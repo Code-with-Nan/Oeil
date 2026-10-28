@@ -1,0 +1,79 @@
+package com.example.oeil.data;
+
+import androidx.annotation.NonNull;
+
+import java.util.Locale;
+
+/**
+ * Offline {@link ReplySource} used until a real backend is wired in.
+ *
+ * <p>Deliberately free of Android and Kotlin APIs so it can be unit tested on
+ * the JVM with plain JUnit.</p>
+ */
+public final class MockReplySource implements ReplySource {
+
+    private static final String GREETING_REPLY = "Hey there! How can I help you today?";
+    private static final String STATUS_REPLY =
+            "I'm running smoothly and ready to help. What's on your mind?";
+    private static final String NAME_REPLY =
+            "I'm Oeil — your assistant for understanding images, writing code, and exploring ideas.";
+    private static final String KOTLIN_REPLY =
+            "Kotlin is a modern language that makes Android development concise and expressive. "
+                    + "It pairs beautifully with Jetpack Compose.";
+    private static final String COMPOSE_REPLY =
+            "Jetpack Compose is Android's declarative UI toolkit. "
+                    + "You describe the UI based on state, and Compose handles the rest.";
+    private static final String IMAGE_REPLY =
+            "Upload or describe an image and I'll help you analyze its contents, text, and context.";
+    private static final String CODE_REPLY =
+            "I can help you design, write, and debug code. "
+                    + "Tell me what you're building and I'll get started.";
+    private static final String THANKS_REPLY = "You're very welcome! Anything else I can help with?";
+    private static final String BYE_REPLY = "See you later! Come back anytime you need a hand.";
+    private static final String FALLBACK_REPLY =
+            "That's a great question. Could you share a bit more detail so I can give you a focused answer?";
+
+    @NonNull
+    @Override
+    public String answer(@NonNull String query) {
+        String normalized = query.toLowerCase(Locale.ROOT);
+
+        if (containsAny(normalized, "hello", "hi")) {
+            return GREETING_REPLY;
+        }
+        if (normalized.contains("how are you")) {
+            return STATUS_REPLY;
+        }
+        if (normalized.contains("name")) {
+            return NAME_REPLY;
+        }
+        if (normalized.contains("kotlin")) {
+            return KOTLIN_REPLY;
+        }
+        if (normalized.contains("compose")) {
+            return COMPOSE_REPLY;
+        }
+        if (normalized.contains("image")) {
+            return IMAGE_REPLY;
+        }
+        if (normalized.contains("code")) {
+            return CODE_REPLY;
+        }
+        if (normalized.contains("thank")) {
+            return THANKS_REPLY;
+        }
+        if (normalized.contains("bye")) {
+            return BYE_REPLY;
+        }
+        return FALLBACK_REPLY;
+    }
+
+    private static boolean containsAny(String value, String... needles) {
+        for (String needle : needles) {
+            if (value.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
