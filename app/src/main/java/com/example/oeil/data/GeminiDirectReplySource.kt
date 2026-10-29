@@ -17,7 +17,7 @@ import java.net.URLEncoder
  * without requiring a separate Node backend server when a Gemini API key is provided.
  */
 class GeminiDirectReplySource(
-    private val apiKey: String = "[REDACTED]",
+    private val apiKey: String,
     private val model: String = "gemini-2.5-flash"
 ) : ConversationReplySource {
 
