@@ -2,13 +2,15 @@ package com.example.oeil.data;
 
 import androidx.annotation.NonNull;
 
+import com.example.oeil.model.ReplyMode;
+
 import java.util.Locale;
 
 /**
  * Offline {@link ReplySource} used until a real backend is wired in.
  *
- * <p>Deliberately free of Android and Kotlin APIs so it can be unit tested on
- * the JVM with plain JUnit.</p>
+ * <p>Deliberately free of Android runtime APIs so it can be unit tested on the
+ * JVM with plain JUnit.</p>
  */
 public final class MockReplySource implements ReplySource {
 
@@ -33,11 +35,16 @@ public final class MockReplySource implements ReplySource {
     private static final String FALLBACK_REPLY =
             "That's a great question. Could you share a bit more detail so I can give you a focused answer?";
 
+    private static final String CREATIVE_TAIL =
+            " Push me with a constraint or a weirder angle and I'll take another run at it.";
+
     @NonNull
     @Override
-    public String answer(@NonNull String query) {
-        String normalized = query.toLowerCase(Locale.ROOT);
+    public String answer(@NonNull String query, @NonNull ReplyMode mode) {
+        return styled(matcher(query.toLowerCase(Locale.ROOT)), mode);
+    }
 
+    private static String matcher(String normalized) {
         if (containsAny(normalized, "hello", "hi")) {
             return GREETING_REPLY;
         }
@@ -66,6 +73,32 @@ public final class MockReplySource implements ReplySource {
             return BYE_REPLY;
         }
         return FALLBACK_REPLY;
+    }
+
+    /**
+     * Precise keeps only the leading sentence, Creative invites another pass,
+     * Auto answers as written.
+     */
+    private static String styled(String reply, ReplyMode mode) {
+        if (mode == ReplyMode.Precise) {
+            return firstSentence(reply);
+        }
+        if (mode == ReplyMode.Creative) {
+            return reply + CREATIVE_TAIL;
+        }
+        return reply;
+    }
+
+    private static String firstSentence(String value) {
+        int cut = -1;
+        String[] marks = {". ", "? ", "! "};
+        for (String mark : marks) {
+            int index = value.indexOf(mark);
+            if (index >= 0 && (cut < 0 || index < cut)) {
+                cut = index;
+            }
+        }
+        return cut < 0 ? value : value.substring(0, cut + 1);
     }
 
     private static boolean containsAny(String value, String... needles) {

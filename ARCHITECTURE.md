@@ -1,8 +1,9 @@
 # Architecture
 
 Oeil follows a **single-activity, unidirectional Compose architecture**. There is no navigation
-graph yet — the app is one screen — so the emphasis is on a clean separation between
-*state*, *behaviour*, and *presentation*.
+library yet: `OeilApp` switches between a sign-in gate and the chat screen based on the stored
+session. The emphasis is on a clean separation between *state*, *behaviour*, *data* and
+*presentation*.
 
 ---
 
@@ -11,30 +12,40 @@ graph yet — the app is one screen — so the emphasis is on a clean separation
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ MainActivity                                                  │
-│   setContent { OeilTheme { OeilScreen() } }                   │
+│   setContent { OeilTheme { OeilApp() } }                      │
 └───────────────────────────────┬──────────────────────────────┘
                                 │
                                 ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ screen/OeilScreen  (composition root of the UI)               │
-│   • owns remember { OeilChatState() }                          │
-│   • owns rememberLazyListState() + rememberCoroutineScope()    │
-│   • assembles Scaffold(topBar, content, bottomBar)             │
+│ OeilApp  (composition root + session gate)                    │
+│   • owns OeilDatabase + AuthRepository                        │
+│   • boot: currentUser()                                       │
+│   • LoginScreen ──login──▶ AuthRepository ──▶ SQLite          │
+│   • OeilScreen(user, BackendReplySource, database, onLogout)  │
+└───────────────────────────────┬──────────────────────────────┘
+                                │
+                                ▼
+┌──────────────────────────────────────────────────────────────┐
+│ screen/OeilScreen                                             │
+│   • remember { OeilChatState(replySource, store, userId) }    │
+│   • loadHistory() on entry, close() on dispose                │
+│   • assembles Scaffold(topBar, content, bottomBar) + drawer   │
 └───────┬──────────────────┬───────────────────┬────────────────┘
         │                  │                   │
         ▼                  ▼                   ▼
   components/ChatHeader  components/    components/ChatInput
-  components/EmptyState  MessageItem    (composer, morphing send)
-                        components/
-                        TypingIndicator + AccentPanel
+  components/EmptyState  MessageItem    (composer, voice + photo intents)
+                         TypingIndicator
+                         components/AppDrawer
         │
         ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ state/OeilChatState  (behaviour)                              │
-│   messages: SnapshotStateList<ChatMessage>                    │
-│   input / isTyping: mutableStateOf                            │
-│   send(scope) ──launch──▶ delay ──▶ ReplySource.answer()      │
-│                                     ▲ (Java) MockReplySource  │
+│ state/OeilChatState  (behaviour + persistence)                │
+│   messages / threads / input / isTyping / mode                │
+│   send() ──▶ ConversationReplySource.reply(history, mode)     │
+│              ├─ BackendReplySource ──▶ backend /chat ──▶ Gemini│
+│              └─ MockConversationReplySource (tests/previews)  │
+│   syncThread() ──▶ persistenceScope ──▶ OeilDatabase          │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -42,12 +53,12 @@ graph yet — the app is one screen — so the emphasis is on a clean separation
 
 | Layer      | Package                          | Responsibility                                                             |
 |------------|----------------------------------|----------------------------------------------------------------------------|
-| Entry      | *(root)* `MainActivity`          | Edge-to-edge setup, theme + screen host. No business logic.                |
-| Screen     | `screen`                         | Layout composition only. Wires state to components.                        |
-| State      | `state`                          | Holds conversation state and mutates it in response to user events.        |
+| Entry      | *(root)* `MainActivity`, `OeilApp` | Edge-to-edge setup, theme, session gate and dependency wiring.            |
+| Screen     | `screen`                         | Login and chat layout. Wires state to components.                          |
+| State      | `state`                          | Conversation state, reply orchestration and persistence.                   |
 | Components | `components`                     | Stateless (or nearly stateless) composables, reusable across screens.      |
-| Data       | `data` (**Java**)               | `ReplySource` interface + `MockReplySource`. The swap point for a real backend. |
-| Model      | `model`                          | Plain immutable data classes.                                              |
+| Data       | `data`, `data.local`             | `AuthRepository`, `BackendReplySource`, SQLite store and the mock seam.    |
+| Model      | `model`                          | Plain immutable data classes (including `User`).                           |
 | Theme      | `ui.theme`                       | Palette, typography and `OeilTheme`.                                       |
 
 **Dependency direction** is strictly downward:
@@ -61,27 +72,33 @@ other. The split is by concern, not by convenience:
 
 | Written in | Packages                     | Why                                                                 |
 |------------|------------------------------|---------------------------------------------------------------------|
-| Kotlin     | `screen`, `components`, `state`, `model`, `ui.theme` | Compose, coroutines, `data class` and sealed types are Kotlin-only. |
-| Java       | `data`                       | The backend seam: SDK/HTTP clients in the Android ecosystem are commonly Java, and an interface with `@NonNull`/`@Nullable` gives both call sites a precise contract. |
+| Kotlin     | `screen`, `components`, `state`, `model`, `ui.theme`, live `data` sources | Compose, coroutines, `data class` and sealed types are Kotlin-only. |
+| Java       | `data/ReplySource.java`, `data/MockReplySource.java` | Legacy blocking reply seam, kept for the offline mock adapter. |
 
-Kotlin → Java happens in one place, `OeilChatState(replySource)`, and because `ReplySource` is a
-blocking API the call is wrapped in `withContext(Dispatchers.IO)`.
+The live path is Kotlin: `BackendReplySource` and `AuthRepository` use `HttpURLConnection` on
+`Dispatchers.IO`, and `OeilDatabase` wraps `SQLiteOpenHelper`. `MockConversationReplySource`
+adapts the blocking Java `ReplySource` for tests and previews.
 Java → Kotlin would work the same way, with the usual caveats: Java sees Kotlin `internal` members
 as public, cannot see top-level functions (they compile to `FileNameKt`), and cannot use default
 arguments without `@JvmOverloads`.
 
 ## 3. State management
 
-State lives in `OeilChatState`, a plain class created with `remember` at the top of
-`OeilScreen`. It is deliberately **not** a `ViewModel` yet:
+State lives in `OeilChatState`, a plain class created with `remember` in `OeilScreen`, keyed by
+the signed-in user, reply source and SQLite store. It is deliberately **not** a `ViewModel` yet:
 
-- The app has no configuration-change survival requirement (no process death handling yet).
-- Keeping it a plain class avoids adding `lifecycle-viewmodel-compose` for a single screen.
+- Conversation history is mirrored to SQLite, so a new state instance can restore it with
+  `loadHistory()`.
+- Keeping it a plain class avoids adding `lifecycle-viewmodel-compose` for two screens.
 - The class is UI-framework-agnostic enough to migrate to a `ViewModel` later by changing only
   the construction site in `OeilScreen`.
 
 ```kotlin
-val chat = remember { OeilChatState() }
+val chat = remember(user.id, replySource, store) {
+    OeilChatState(replySource = replySource, store = store, userId = user.id)
+}
+LaunchedEffect(chat) { chat.loadHistory() }
+DisposableEffect(chat) { onDispose { chat.close() } }
 ```
 
 ### State properties
@@ -98,24 +115,26 @@ val chat = remember { OeilChatState() }
 user taps send
    │
    ├─ OeilChatState.send(scope)
-   │     1. validate: non-blank && !isTyping
+   │     1. validate: text or attachment && !isTyping
    │     2. messages += ChatMessage(isUser = true)
-   │     3. input = "" ; isTyping = true
+   │     3. input = "" ; isTyping = true ; syncThread() → SQLite
    │     4. scope.launch {
-   │            delay(1_100 ms)                 // simulated latency
-   │            withContext(Dispatchers.IO) { replySource.answer(text) }
+   │            withContext(Dispatchers.IO) {
+   │                replySource.reply(messages.toList(), mode)
+   │            }
    │            messages += ChatMessage(reply, isUser = false)
-   │            isTyping = false
+   │            isTyping = false ; syncThread() → SQLite
    │        }
    │
-   ├─ OeilScreen LaunchedEffect(messages.size, isTyping)
+   ├─ OeilScreen follows messages.size / isTyping
    │        → listState.animateScrollToItem(latestIndex)
    │
    └─ recomposition renders MessageItem / TypingIndicator
 ```
 
 `send` takes an explicit `CoroutineScope` (`rememberCoroutineScope()` from the composable) so the
-delay coroutine is cancelled automatically if the screen leaves composition.
+reply coroutine is cancelled if the screen leaves composition. SQLite writes go through a separate
+single-lane `persistenceScope`, so they stay ordered and never block the UI thread.
 
 ## 4. Screen composition
 
@@ -123,10 +142,12 @@ delay coroutine is cancelled automatically if the screen leaves composition.
 
 | Composable            | Role                                                                  |
 |-----------------------|-----------------------------------------------------------------------|
-| `OeilScreen`          | Gradient background, ambient glow, Scaffold wiring                    |
-| `AmbientGlow`         | Decorative radial gradient behind the header                          |
-| `AutoScrollToLatest`  | `LaunchedEffect` that follows the newest item                         |
+| `OeilApp`             | Boot/session gate: `LoginScreen` or `OeilScreen`                      |
+| `LoginScreen`         | Email/password form                                                   |
+| `OeilScreen`          | Drawer, background and Scaffold wiring                                |
+| `FollowLatest`        | `LaunchedEffect` that follows the newest item                         |
 | `Conversation`        | `LazyColumn` + empty-state overlay                                    |
+| `JumpToLatest`        | Floating shortcut back to the newest message                          |
 
 Public UI building blocks live in `components/` and take their behaviour as lambdas
 (`onSend`, `onValueChange`, `onPick`), which keeps them previewable and reusable.
@@ -139,34 +160,37 @@ Public UI building blocks live in `components/` and take their behaviour as lamb
 - Components reference theme colors **directly** (not `MaterialTheme.colorScheme.*`) for
   gradients and one-off accents; `MaterialTheme.typography` is used for text styles.
 
-## 6. Data layer (Java)
+## 6. Data layer
 
 ```
 data/
-├── ReplySource.java      # interface  String answer(String query)   ← the seam
-└── MockReplySource.java  # offline canned answers (current behaviour)
+├── AuthRepository.kt             # login API + local demo fallback
+├── GeminiReplySource.kt          # Gemini generateContent REST client
+├── ConversationReplySource.kt    # history-aware suspend seam
+├── MockConversationReplySource.kt
+├── ReplySource.java              # legacy blocking Java seam
+├── MockReplySource.java          # offline canned answers
+└── local/
+    └── OeilDatabase.kt           # SQLiteOpenHelper store
 ```
 
-`ReplySource` is the single seam between the UI and a future backend. It is deliberately a plain
-blocking Java interface: nothing Compose- or coroutine-specific leaks into it, so it can be
-implemented (and unit tested) by Java-only code.
+**Reply path.** `ConversationReplySource` is a suspend interface that receives the whole
+conversation and the current `ReplyMode`. The app uses `GeminiReplySource`, which POSTs to
+`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` with a system
+instruction and a mode-specific temperature. `MockConversationReplySource` adapts the legacy Java
+`ReplySource` for tests and previews.
 
-Swapping in a real client means:
+**Auth path.** `AuthRepository` normalizes the email, validates the password, then either calls
+the configured `LOGIN_API_URL` (`POST {"email","password"}`) or runs a local demo login. Either
+way the user and active session are written to SQLite; `OeilApp` reads the active user on boot.
 
-1. Add `ApiReplySource implements ReplySource` that calls the SDK/HTTP client.
-2. Keep `MockReplySource` behind a debug/preview flag.
-3. Pass the chosen implementation to `OeilChatState(replySource)` — the default is already
-   `MockReplySource`.
+**Storage.** `OeilDatabase` owns five tables — `users`, `session`, `threads`, `messages` and
+`settings` — and is accessed from `Dispatchers.IO` only. Threads and messages are keyed by user
+and rewritten transactionally on each send. The Gemini key entered at sign-in is stored in
+`settings` for the prototype; a production build should move it to encrypted storage.
 
-```kotlin
-// OeilChatState.kt
-class OeilChatState(
-    private val replySource: ReplySource = MockReplySource()
-)
-```
-
-No persistence exists yet; `ChatMessage` is in-memory only (`id` is a UUID, used as the
-`LazyColumn` key).
+The API key, model and login URL are injected through `BuildConfig` fields generated from
+`local.properties`, environment variables or Gradle properties. No secret is committed.
 
 ## 7. Build & quality
 
@@ -180,8 +204,10 @@ No persistence exists yet; `ChatMessage` is in-memory only (`id` is a UUID, used
 
 | Goal                      | Where to change                                              |
 |---------------------------|--------------------------------------------------------------|
-| Real model responses      | Add `ApiReplySource implements ReplySource` in `data/`       |
-| Persist history           | Add a repository; back `OeilChatState.messages` with it      |
-| Multiple screens/navigation | Add `navigation-compose` and move `OeilScreen` into a graph |
+| Another model/provider    | Implement `ConversationReplySource` and pass it to `OeilScreen` |
+| Real login backend        | Set `LOGIN_API_URL`; adjust parsing in `AuthRepository`      |
+| Richer persistence        | Extend `OeilDatabase` schema/methods and bump `DATABASE_VERSION` |
+| Secure key storage        | Replace the `settings` row with `EncryptedSharedPreferences`/Keystore |
+| Multiple screens/navigation | Add `navigation-compose` and move the gates into a graph   |
 | Light theme               | Add a light `ColorScheme` in `Theme.kt` and honour `darkTheme` |
 | View model migration      | Construct `OeilChatState` in a `viewModel { }` instead of `remember` |

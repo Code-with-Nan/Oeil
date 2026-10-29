@@ -1,26 +1,23 @@
 package com.example.oeil.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,178 +25,158 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.oeil.ui.theme.GreenPrimary
 import com.example.oeil.ui.theme.OutlineDark
-import com.example.oeil.ui.theme.SurfaceDark
+import com.example.oeil.ui.theme.SurfaceDrawerItem
+import com.example.oeil.ui.theme.SurfaceElevated
 import com.example.oeil.ui.theme.TextPrimary
 import com.example.oeil.ui.theme.TextSecondary
-import com.example.oeil.ui.theme.TealAccent
 import java.util.Calendar
 
 private data class Suggestion(
     val icon: ImageVector,
-    val title: String,
-    val subtitle: String,
+    val label: String,
     val prompt: String
 )
 
 private val suggestions = listOf(
     Suggestion(
-        icon = Icons.Default.Image,
-        title = "Analyze an image",
-        subtitle = "Describe or explain what's in it",
-        prompt = "Analyze this image for me"
+        icon = Icons.Outlined.ChatBubbleOutline,
+        label = "Start a topic",
+        prompt = "Explain something I've always faked understanding"
     ),
     Suggestion(
-        icon = Icons.Default.Code,
-        title = "Write code",
-        subtitle = "Build something new",
-        prompt = "Write a Kotlin function that..."
+        icon = Icons.Outlined.Lightbulb,
+        label = "Brainstorm ideas",
+        prompt = "Help me brainstorm ideas for"
     ),
     Suggestion(
-        icon = Icons.Default.Lightbulb,
-        title = "Brainstorm",
-        subtitle = "Ideas and concepts",
-        prompt = "Help me brainstorm ideas for..."
-    ),
-    Suggestion(
-        icon = Icons.Default.Mic,
-        title = "Voice chat",
-        subtitle = "Speak naturally",
-        prompt = "Let's have a voice conversation"
+        icon = Icons.Outlined.AutoAwesome,
+        label = "Write code",
+        prompt = "Write a Kotlin function that"
     )
 )
 
 /**
- * Landing view before the first message: a left-aligned, time-aware headline
- * followed by a horizontally scrolling strip of prompt cards.
+ * Landing view before the first message: one plain line of greeting and three
+ * prompts that pre-fill the composer and raise the keyboard.
  */
 @Composable
 fun EmptyState(
     onPick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-            Text(
-                text = timeGreeting(),
-                style = MaterialTheme.typography.labelLarge,
-                color = TextSecondary
-            )
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        horizontalAlignment = Alignment.Start
+    ) {
+        Spacer(modifier = Modifier.weight(1f))
 
-            Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = greeting(),
+            style = MaterialTheme.typography.labelLarge,
+            color = TextSecondary
+        )
 
-            Text(
-                text = "What are we",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-            )
-            Text(
-                text = "exploring today?",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = GreenPrimary
-            )
-        }
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = "What's on your mind?",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Normal,
+            color = TextPrimary
+        )
 
         Spacer(modifier = Modifier.height(28.dp))
 
-        Text(
-            text = "Popular starting points",
-            style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary,
-            modifier = Modifier.padding(horizontal = 20.dp)
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        SuggestionStrip(onPick = onPick)
-    }
-}
-
-@Composable
-private fun SuggestionStrip(
-    onPick: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    LazyRow(
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        items(suggestions) { suggestion ->
-            SuggestionCard(
+        suggestions.forEach { suggestion ->
+            SuggestionRow(
                 suggestion = suggestion,
                 onClick = { onPick(suggestion.prompt) }
             )
         }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Text(
+            text = "Long-press a message to copy it",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary.copy(alpha = 0.7f),
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+    }
+}
+
+private fun greeting(): String {
+    val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    return when {
+        hour < 5 -> "Still up"
+        hour < 12 -> "Good morning"
+        hour < 18 -> "Good afternoon"
+        else -> "Good evening"
     }
 }
 
 @Composable
-private fun SuggestionCard(
+private fun SuggestionRow(
     suggestion: Suggestion,
     onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(20.dp)
-
-    Column(
+    val shape = RoundedCornerShape(18.dp)
+    OeilTouch(
+        onClick = onClick,
         modifier = Modifier
-            .width(172.dp)
-            .clip(shape)
-            .background(SurfaceDark)
-            .border(1.dp, OutlineDark, shape)
-            .clickable(onClick = onClick)
-            .padding(16.dp)
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        shape = shape,
+        color = SurfaceElevated,
+        borderColor = OutlineDark
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            GreenPrimary.copy(alpha = 0.18f),
-                            TealAccent.copy(alpha = 0.12f)
-                        )
-                    )
-                ),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            IconChip(icon = suggestion.icon)
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Text(
+                text = suggestion.label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = TextPrimary,
+                modifier = Modifier.weight(1f)
+            )
+
             Icon(
-                imageVector = suggestion.icon,
+                imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
                 contentDescription = null,
-                tint = GreenPrimary,
-                modifier = Modifier.size(20.dp)
+                tint = TextSecondary.copy(alpha = 0.6f),
+                modifier = Modifier.size(16.dp)
             )
         }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = suggestion.title,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = TextPrimary
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = suggestion.subtitle,
-            style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary
-        )
     }
 }
 
-private fun timeGreeting(): String = when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
-    in 5..11 -> "Good morning"
-    in 12..17 -> "Good afternoon"
-    else -> "Good evening"
+@Composable
+private fun IconChip(icon: ImageVector) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(SurfaceDrawerItem),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = TextSecondary,
+            modifier = Modifier.size(18.dp)
+        )
+    }
 }
