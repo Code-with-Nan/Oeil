@@ -98,7 +98,7 @@ fun OeilScreen(
     val snackbar = remember { SnackbarHostState() }
     val composerFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    var clipboard = LocalContext.current.getSystemService(ClipboardManager::class.java)
+    val clipboard = LocalContext.current.getSystemService(ClipboardManager::class.java)
 
     val notice: (String) -> Unit = { message ->
         scope.launch {
@@ -212,7 +212,7 @@ fun OeilScreen(
                     chat = chat,
                     listState = listState,
                     onCopy = { text ->
-                        clipboard.primaryClip = ClipData.newPlainText("Oeil", text)
+                        clipboard?.setPrimaryClip(ClipData.newPlainText("Oeil", text))
                         notice("Copied")
                     },
                     onJumpToLatest = {
