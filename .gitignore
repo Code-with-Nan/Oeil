@@ -14,6 +14,7 @@
 .cxx
 local.properties
 /backend/.env
+/backend/.env.*
 /backend/.venv/
 /backend/__pycache__/
 /backend/oeil-auth.sqlite3*
