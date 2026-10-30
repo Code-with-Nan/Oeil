@@ -104,7 +104,9 @@ policy requirements; check current store policy before release.
 
 ## Android build
 
-Requirements: Android Studio with JDK 11+ and Android SDK 37.
+Requirements: Android Studio with a full JDK 17+ (one that includes `jlink`)
+and Android SDK 37. The Gradle daemon is pinned to Oracle JDK 25; Gradle
+downloads it automatically on the first build if it is not installed.
 
 ```bash
 ./gradlew assembleDebug
