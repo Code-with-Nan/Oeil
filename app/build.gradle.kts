@@ -3,6 +3,13 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// The app is pre-pointed at the Oeil service so users never have to enter an
+// API URL or key. Override for a real deployment with -PoeilBackendUrl=... or
+// the OEIL_BACKEND_URL environment variable.
+val oeilBackendUrl = providers.gradleProperty("oeilBackendUrl").orNull
+    ?: providers.environmentVariable("OEIL_BACKEND_URL").orNull
+    ?: "http://10.0.2.2:8000"
+
 android {
     namespace = "com.example.oeil"
     compileSdk {
@@ -17,7 +24,11 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
+        buildConfigField(
+            "String",
+            "OEIL_BACKEND_URL",
+            "\"${oeilBackendUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"",
+        )
     }
 
     buildTypes {

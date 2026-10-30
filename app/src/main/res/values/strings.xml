@@ -1,3 +1,13 @@
 <resources>
     <string name="app_name">Oeil</string>
+    <string name="accessibility_service_label">Oeil Accessibility Service</string>
+    <string name="accessibility_service_description">Allows Oeil to interact with screen elements and perform user-approved actions.</string>
+    <string name="accessibility_approval_title">Action Confirmation</string>
+    <string name="accessibility_approval_screen_label">Target: %1$s</string>
+    <string name="accessibility_approval_text_label">Text: %1$s</string>
+    <string name="accessibility_approval_app_label">App: %1$s</string>
+    <string name="accessibility_approval_deny">Deny</string>
+    <string name="accessibility_approval_allow">Allow</string>
+    <string name="accessibility_status_working">Oeil is working</string>
+    <string name="accessibility_status_detail">Oeil is working · %1$s</string>
 </resources>

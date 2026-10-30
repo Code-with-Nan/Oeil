@@ -18,21 +18,15 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.oeil.data.normalizeBackendUrl
 import com.example.oeil.model.User
 import com.example.oeil.ui.theme.BackgroundDark
+import com.example.oeil.ui.theme.GreenPrimary
 import com.example.oeil.ui.theme.TextPrimary
 import com.example.oeil.ui.theme.TextSecondary
 
@@ -40,20 +34,18 @@ private val themeOptions = listOf("System", "Light", "Dark")
 
 @Composable
 fun SettingsScreen(
-    initialBackendUrl: String,
     user: User,
     themeMode: String,
+    serviceConfigured: Boolean,
+    accessibilityConnected: Boolean,
     onBack: () -> Unit,
-    onSaveBackendUrl: (String) -> Unit,
+    onEnableAccessibility: () -> Unit,
     onThemeModeChange: (String) -> Unit,
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
     accountError: String?,
     modifier: Modifier = Modifier,
 ) {
-    var backendUrl by remember(initialBackendUrl) { mutableStateOf(initialBackendUrl) }
-    var error by remember { mutableStateOf<String?>(null) }
-
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -98,6 +90,42 @@ fun SettingsScreen(
             }
         }
 
+        SettingsSection(
+            title = "System control",
+            subtitle = "Let Oeil read the screen and perform actions you approve.",
+        ) {
+            Text(
+                text = if (accessibilityConnected) {
+                    "Android control is ready."
+                } else {
+                    "Android control is off."
+                },
+                color = if (accessibilityConnected) GreenPrimary else TextPrimary,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = if (accessibilityConnected) {
+                    "Ask Oeil to open apps, tap controls, type text, scroll, or navigate."
+                } else {
+                    "Turn on Oeil in Android Accessibility settings. Every action is " +
+                        "approved in a system overlay before it runs."
+                },
+                modifier = Modifier.padding(top = 4.dp),
+                color = TextSecondary,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+            if (accessibilityConnected) {
+                OutlinedButton(onClick = onEnableAccessibility, modifier = Modifier.fillMaxWidth()) {
+                    Text("Open Android accessibility settings")
+                }
+            } else {
+                Button(onClick = onEnableAccessibility, modifier = Modifier.fillMaxWidth()) {
+                    Text("Enable Android control")
+                }
+            }
+        }
+
         SettingsSection(title = "Account", subtitle = "Your account keeps your profile ready across sessions.") {
             Text(
                 text = user.email ?: "Using Oeil on this device",
@@ -134,46 +162,26 @@ fun SettingsScreen(
             }
         }
 
-        SettingsSection(title = "AI connection", subtitle = "Connect Oeil to your Python relay.") {
-            OutlinedTextField(
-                value = backendUrl,
-                onValueChange = {
-                    backendUrl = it
-                    error = null
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Backend URL") },
-                placeholder = { Text("https://api.example.com") },
-                singleLine = true,
-                isError = error != null,
+        SettingsSection(
+            title = "AI service",
+            subtitle = "Oeil connects to its service automatically; no API key or URL is needed.",
+        ) {
+            Text(
+                text = if (serviceConfigured) "Connected build configuration" else "Not configured",
+                color = if (serviceConfigured) GreenPrimary else TextSecondary,
+                style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                text = "Enter the server address, not the /chat path. Leave blank to disconnect.",
-                modifier = Modifier.padding(top = 8.dp),
-                color = TextSecondary,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            error?.let {
-                Text(
-                    text = it,
-                    modifier = Modifier.padding(top = 8.dp),
-                    color = Color(0xFFFF7A7A),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(
-                onClick = {
-                    try {
-                        onSaveBackendUrl(normalizeBackendUrl(backendUrl))
-                    } catch (invalidUrl: IllegalArgumentException) {
-                        error = invalidUrl.message ?: "Enter a valid backend URL."
-                    }
+                text = if (serviceConfigured) {
+                    "The provider key stays on the Oeil service and is never on this device."
+                } else {
+                    "This build was compiled without a service address. Reinstall a build " +
+                        "that includes the Oeil service, or use a developer build."
                 },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Save backend")
-            }
+                modifier = Modifier.padding(top = 4.dp),
+                color = TextSecondary,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
         Spacer(modifier = Modifier.height(24.dp))
     }

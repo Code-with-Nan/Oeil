@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Debug builds only. Lets the app reach a local HTTP backend
-    (for example http://10.0.2.2:3000) during development.
+    (for example http://10.0.2.2:8000) during development.
     Release builds keep Android's default: cleartext traffic is blocked.
 -->
 <network-security-config>

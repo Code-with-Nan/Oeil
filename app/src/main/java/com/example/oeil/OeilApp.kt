@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,10 +33,12 @@ import com.example.oeil.data.AuthClient
 import com.example.oeil.data.AuthSession
 import com.example.oeil.data.BackendReplySource
 import com.example.oeil.data.local.OeilDatabase
+import com.example.oeil.data.normalizeBackendUrl
 import com.example.oeil.model.User
 import com.example.oeil.screen.AuthScreen
 import com.example.oeil.screen.OeilScreen
 import com.example.oeil.screen.SettingsScreen
+import com.example.oeil.system.OeilAccessibility
 import com.example.oeil.ui.theme.BackgroundDark
 import com.example.oeil.ui.theme.GreenPrimary
 import com.example.oeil.ui.theme.OeilTheme
@@ -59,7 +62,7 @@ fun OeilApp(
 
     var booting by remember { mutableStateOf(true) }
     var user by remember { mutableStateOf<User?>(null) }
-    var backendUrl by remember { mutableStateOf("") }
+    val backendUrl = remember { configuredBackendUrl() }
     var authToken by remember { mutableStateOf<String?>(null) }
     var themeMode by remember { mutableStateOf("Dark") }
     var showSettings by remember { mutableStateOf(false) }
@@ -67,6 +70,7 @@ fun OeilApp(
     var authBusy by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
     var accountError by remember { mutableStateOf<String?>(null) }
+    val accessibilityConnected by OeilAccessibility.connected.collectAsState()
     val darkTheme = themeMode == "Dark" ||
         (themeMode == "System" && androidx.compose.foundation.isSystemInDarkTheme())
     val view = LocalView.current
@@ -85,14 +89,13 @@ fun OeilApp(
         val savedState = withContext(Dispatchers.IO) {
             Triple(
                 database.localUser(),
-                database.getSetting(BACKEND_URL_SETTING).orEmpty(),
                 database.getSetting(THEME_MODE_SETTING) ?: "Dark",
-            ) to database.getSetting(AUTH_TOKEN_SETTING)
+                database.getSetting(AUTH_TOKEN_SETTING),
+            )
         }
-        user = savedState.first.first
-        backendUrl = savedState.first.second
-        themeMode = savedState.first.third
-        authToken = savedState.second
+        user = savedState.first
+        themeMode = savedState.second
+        authToken = savedState.third
         booting = false
     }
 
@@ -101,7 +104,7 @@ fun OeilApp(
         showAuth = true
         authError = null
         if (backendUrl.isBlank()) {
-            authError = "Set the backend URL in Settings before signing in."
+            authError = "This build does not include an Oeil service address."
             onAuthCallbackHandled()
             return@LaunchedEffect
         }
@@ -176,24 +179,19 @@ fun OeilApp(
                     } catch (error: ActivityNotFoundException) {
                         authError = "No browser is available to continue sign-in."
                     } catch (error: IllegalArgumentException) {
-                        authError = error.message ?: "Set a valid backend URL in Settings."
+                        authError = error.message ?: "This build does not include an Oeil service address."
                     }
                 },
                 modifier = modifier,
             )
             showSettings -> SettingsScreen(
-                initialBackendUrl = backendUrl,
                 user = requireNotNull(user),
                 themeMode = themeMode,
+                serviceConfigured = backendUrl.isNotBlank(),
+                accessibilityConnected = accessibilityConnected,
                 onBack = { showSettings = false },
-                onSaveBackendUrl = { updatedUrl ->
-                    scope.launch {
-                        withContext(Dispatchers.IO) {
-                            database.setSetting(BACKEND_URL_SETTING, updatedUrl)
-                        }
-                        backendUrl = updatedUrl
-                        accountError = null
-                    }
+                onEnableAccessibility = {
+                    context.startActivity(OeilAccessibility.accessibilitySettingsIntent())
                 },
                 onThemeModeChange = { selectedMode ->
                     themeMode = selectedMode
@@ -241,6 +239,8 @@ fun OeilApp(
                     user = activeUser,
                     replySource = replySource,
                     store = database,
+                    androidAgentSource = replySource,
+                    androidActionExecutor = OeilAccessibility,
                     onOpenSettings = { showSettings = true },
                     modifier = modifier,
                 )
@@ -287,6 +287,11 @@ private fun BootScreen(modifier: Modifier = Modifier) {
     }
 }
 
-private const val BACKEND_URL_SETTING = "backend_url"
+private fun configuredBackendUrl(): String {
+    val raw = BuildConfig.OEIL_BACKEND_URL.trim()
+    if (raw.isBlank()) return ""
+    return runCatching { normalizeBackendUrl(raw) }.getOrDefault(raw.trimEnd('/'))
+}
+
 private const val THEME_MODE_SETTING = "theme_mode"
 private const val AUTH_TOKEN_SETTING = "auth_token"

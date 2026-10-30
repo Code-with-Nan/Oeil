@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.oeil.model.ReplyMode
 import com.example.oeil.ui.theme.OutlineDark
+import com.example.oeil.ui.theme.GreenPrimary
 import com.example.oeil.ui.theme.SurfaceElevated
 import com.example.oeil.ui.theme.TextPrimary
 import com.example.oeil.ui.theme.TextSecondary
@@ -38,6 +40,9 @@ fun ChatHeader(
     onNewChat: () -> Unit,
     mode: ReplyMode,
     onModeClick: () -> Unit,
+    androidMode: Boolean,
+    accessibilityConnected: Boolean,
+    onAndroidClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -66,6 +71,26 @@ fun ChatHeader(
         Spacer(modifier = Modifier.width(10.dp))
 
         ModeSelector(mode = mode, onClick = onModeClick)
+
+        Spacer(modifier = Modifier.width(4.dp))
+
+        OeilTouch(
+            onClick = onAndroidClick,
+            modifier = Modifier.size(36.dp),
+            color = if (androidMode) GreenPrimary.copy(alpha = 0.16f) else SurfaceElevated.copy(alpha = 0.5f),
+            borderColor = if (androidMode) GreenPrimary.copy(alpha = 0.55f) else OutlineDark
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.PhoneAndroid,
+                contentDescription = when {
+                    !accessibilityConnected -> "Enable Android control"
+                    androidMode -> "Turn Android control off"
+                    else -> "Turn Android control on"
+                },
+                tint = if (androidMode) GreenPrimary else TextSecondary,
+                modifier = Modifier.size(18.dp)
+            )
+        }
 
         Spacer(modifier = Modifier.weight(1f))
 

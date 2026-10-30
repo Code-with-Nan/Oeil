@@ -1,7 +1,11 @@
 package com.example.oeil.data
 
+import com.example.oeil.model.AgentTurn
 import com.example.oeil.model.ChatMessage
+import com.example.oeil.model.InstalledApp
 import com.example.oeil.model.ReplyMode
+import com.example.oeil.model.ScreenElement
+import com.example.oeil.model.SystemAction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -12,23 +16,101 @@ import java.net.URL
 import java.util.Locale
 
 /** Calls the Oeil relay; provider credentials never leave the server. */
-class BackendReplySource(backendUrl: String) : ConversationReplySource {
+class BackendReplySource(backendUrl: String) : ConversationReplySource, AndroidAgentSource {
 
-    private val chatUrl = "${backendUrl.trimEnd('/')}/chat"
+    private val baseUrl = backendUrl.trimEnd('/')
+    private val chatUrl = "$baseUrl/chat"
+    private val agentUrl = "$baseUrl/agent/step"
+
+    override suspend fun nextStep(
+        task: String,
+        screen: List<ScreenElement>,
+        apps: List<InstalledApp>,
+        history: List<ChatMessage>,
+        mode: ReplyMode
+    ): AgentTurn = withContext(Dispatchers.IO) {
+        requireConfigured()
+
+        val elements = JSONArray()
+        screen.forEach { element ->
+            elements.put(
+                JSONObject()
+                    .put("id", element.id)
+                    .put("label", element.label)
+                    .put("clickable", element.clickable)
+                    .put("editable", element.editable)
+            )
+        }
+        val appList = JSONArray()
+        apps.forEach { app ->
+            appList.put(
+                JSONObject()
+                    .put("label", app.label)
+                    .put("package_name", app.packageName)
+            )
+        }
+        val messages = JSONArray()
+        history.takeLast(MAX_HISTORY_MESSAGES).forEach { message ->
+            if (message.content.isBlank()) return@forEach
+            messages.put(
+                JSONObject()
+                    .put("role", if (message.isUser) "user" else "assistant")
+                    .put("content", message.content)
+            )
+        }
+
+        val body = JSONObject()
+            .put("task", task)
+            .put("mode", mode.name.uppercase(Locale.ROOT))
+            .put("screen", elements)
+            .put("apps", appList)
+            .put("messages", messages)
+            .toString()
+        val response = post(agentUrl, body)
+        when (response.optString("type")) {
+            "message" -> response.optString("message").trim()
+                .takeIf(String::isNotBlank)
+                ?.let(AgentTurn::Message)
+                ?: throw IOException("The Oeil service returned an empty agent message.")
+            "action" -> {
+                val action = response.optJSONObject("action")
+                    ?: throw IOException("The Oeil service returned an invalid action.")
+                AgentTurn.Action(
+                    SystemAction(
+                        type = action.optString("type"),
+                        summary = action.optString("summary"),
+                        targetId = action.stringOrNull("target_id"),
+                        targetLabel = action.stringOrNull("target_label"),
+                        text = action.stringOrNull("text"),
+                        direction = action.stringOrNull("direction"),
+                        packageName = action.stringOrNull("package_name"),
+                        appName = action.stringOrNull("app_name"),
+                        url = action.stringOrNull("url")
+                    )
+                )
+            }
+            else -> throw IOException("The Oeil service returned an unknown agent step.")
+        }
+    }
 
     override suspend fun reply(messages: List<ChatMessage>, mode: ReplyMode): String =
         withContext(Dispatchers.IO) {
-            if (chatUrl == "/chat") {
-                throw IllegalStateException(
-                    "Backend URL is not configured. Open the menu and choose Settings."
-                )
-            }
-            request(buildBody(messages, mode))
+            requireConfigured()
+            val response = post(chatUrl, buildBody(messages, mode))
+            response.optString("reply").trim()
+                .takeIf(String::isNotBlank)
+                ?: throw IOException("The Oeil service returned an empty reply.")
         }
+
+    private fun requireConfigured() {
+        if (baseUrl.isBlank()) {
+            throw IllegalStateException("The Oeil service is not configured in this build.")
+        }
+    }
 
     private fun buildBody(messages: List<ChatMessage>, mode: ReplyMode): String {
         val payload = JSONArray()
-        messages.takeLast(MAX_MESSAGES).forEach { message ->
+        messages.takeLast(MAX_HISTORY_MESSAGES).forEach { message ->
             val text = buildString {
                 message.attachmentLabel?.let {
                     append("[Attached image: ").append(it).append("]\n")
@@ -50,12 +132,12 @@ class BackendReplySource(backendUrl: String) : ConversationReplySource {
             .toString()
     }
 
-    private fun request(body: String): String {
-        val connection = URL(chatUrl).openConnection() as HttpURLConnection
+    private fun post(url: String, body: String): JSONObject {
+        val connection = URL(url).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 30_000
-            connection.readTimeout = 90_000
+            connection.readTimeout = 120_000
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             connection.setRequestProperty("Accept", "application/json")
@@ -74,18 +156,16 @@ class BackendReplySource(backendUrl: String) : ConversationReplySource {
                 throw IOException(errorMessage(response, code))
             }
 
-            val json = runCatching { JSONObject(response) }.getOrElse {
-                throw IOException("The chat server returned an unreadable response.")
+            return runCatching { JSONObject(response) }.getOrElse {
+                throw IOException("The Oeil service returned an unreadable response.")
             }
-            val reply = json.optString("reply").trim()
-            if (reply.isBlank()) {
-                throw IOException("The chat server returned an empty reply.")
-            }
-            return reply
         } finally {
             connection.disconnect()
         }
     }
+
+    private fun JSONObject.stringOrNull(key: String): String? =
+        optString(key).takeIf(String::isNotBlank)
 
     private fun errorMessage(payload: String, code: Int): String {
         val message = runCatching {
@@ -100,6 +180,6 @@ class BackendReplySource(backendUrl: String) : ConversationReplySource {
     }
 
     private companion object {
-        const val MAX_MESSAGES = 50
+        const val MAX_HISTORY_MESSAGES = 20
     }
 }

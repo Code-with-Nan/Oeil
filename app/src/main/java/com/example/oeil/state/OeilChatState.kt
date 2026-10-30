@@ -6,12 +6,15 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.example.oeil.data.ConversationReplySource
+import com.example.oeil.data.AndroidActionExecutor
+import com.example.oeil.data.AndroidAgentSource
 import com.example.oeil.data.MockConversationReplySource
 import com.example.oeil.data.local.OeilDatabase
 import com.example.oeil.model.Attachment
 import com.example.oeil.model.ChatMessage
 import com.example.oeil.model.ChatThread
 import com.example.oeil.model.ReplyMode
+import com.example.oeil.model.AgentTurn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +40,9 @@ class OeilChatState(
     private val replySource: ConversationReplySource = MockConversationReplySource(),
     private val replyDelayMs: Long = REPLY_DELAY_MS,
     private val store: OeilDatabase? = null,
-    private val userId: String? = null
+    private val userId: String? = null,
+    private val androidAgentSource: AndroidAgentSource? = null,
+    private val androidActionExecutor: AndroidActionExecutor? = null
 ) {
 
     val messages = mutableStateListOf<ChatMessage>()
@@ -52,6 +57,9 @@ class OeilChatState(
         private set
 
     var mode by mutableStateOf(ReplyMode.Auto)
+        private set
+
+    var androidMode by mutableStateOf(false)
         private set
 
     var draftAttachment by mutableStateOf<Attachment?>(null)
@@ -110,6 +118,11 @@ class OeilChatState(
         mode = mode.next()
     }
 
+    @JvmName("updateAndroidMode")
+    fun setAndroidMode(enabled: Boolean) {
+        androidMode = enabled && androidAgentSource != null && androidActionExecutor != null
+    }
+
     fun send(scope: CoroutineScope) {
         val text = input.trim()
         val attachment = draftAttachment
@@ -129,15 +142,20 @@ class OeilChatState(
 
         val history = messages.toList()
         val activeMode = mode
+        val useAndroid = androidMode
 
         replyJob = scope.launch {
             if (replyDelayMs > 0) delay(replyDelayMs)
             try {
                 // Network and blocking clients stay off the main thread.
-                val reply = withContext(Dispatchers.IO) {
-                    replySource.reply(history, activeMode)
+                if (useAndroid) {
+                    runAndroidTask(text, activeMode)
+                } else {
+                    val reply = withContext(Dispatchers.IO) {
+                        replySource.reply(history, activeMode)
+                    }
+                    messages.add(ChatMessage(content = reply, isUser = false))
                 }
-                messages.add(ChatMessage(content = reply, isUser = false))
                 isTyping = false
                 syncThread()
             } catch (cancelled: CancellationException) {
@@ -202,6 +220,84 @@ class OeilChatState(
         replyJob = null
     }
 
+    private suspend fun runAndroidTask(task: String, activeMode: ReplyMode) {
+        val agent = checkNotNull(androidAgentSource)
+        val controller = checkNotNull(androidActionExecutor)
+        controller.updateTaskStatus("Preparing the task")
+        try {
+            var taskContext = task
+            repeat(MAX_AGENT_STEPS) {
+                controller.updateTaskStatus("Reading the screen")
+                val screen = try {
+                    controller.screenElements()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    messages.add(ChatMessage(content = failureMessage(error), isUser = false))
+                    syncThread()
+                    return
+                }
+                val apps = try {
+                    controller.installedApps()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    emptyList()
+                }
+
+                controller.updateTaskStatus("Thinking about the next step")
+                val turn = when (val step = agent.nextStep(
+                    task = taskContext,
+                    screen = screen,
+                    apps = apps,
+                    history = messages.toList(),
+                    mode = activeMode
+                )) {
+                    is AgentTurn.Message -> {
+                        messages.add(ChatMessage(content = step.text, isUser = false))
+                        syncThread()
+                        return
+                    }
+                    is AgentTurn.Action -> step
+                }
+
+                messages.add(
+                    ChatMessage(content = "Android action: ${turn.action.summary}", isUser = false)
+                )
+                syncThread()
+                controller.updateTaskStatus("Waiting for approval: ${turn.action.summary}")
+                val result = try {
+                    controller.approveAndPerform(turn.action)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    messages.add(ChatMessage(content = failureMessage(error), isUser = false))
+                    syncThread()
+                    return
+                }
+                if (result == null) {
+                    messages.add(ChatMessage(content = "Action denied. I stopped here.", isUser = false))
+                    syncThread()
+                    return
+                }
+                messages.add(ChatMessage(content = result, isUser = false))
+                syncThread()
+                controller.updateTaskStatus("Checking the result")
+                taskContext += "\nApproved action result: $result"
+                delay(AGENT_SCREEN_SETTLE_MS)
+            }
+            messages.add(
+                ChatMessage(
+                    content = "I stopped after $MAX_AGENT_STEPS actions. Tell me what to do next.",
+                    isUser = false
+                )
+            )
+            syncThread()
+        } finally {
+            controller.updateTaskStatus(null)
+        }
+    }
+
     private fun syncThread() {
         if (messages.isEmpty()) return
         val snapshot = messages.toList()
@@ -256,5 +352,7 @@ class OeilChatState(
     private companion object {
         const val REPLY_DELAY_MS = 0L
         const val TITLE_MAX = 42
+        const val MAX_AGENT_STEPS = 8
+        const val AGENT_SCREEN_SETTLE_MS = 1000L
     }
 }

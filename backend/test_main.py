@@ -1,11 +1,11 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from main import ChatRequest, app, provider_payload
+from main import AgentStepRequest, ChatRequest, agent_payload, app, gemini_payload, gemini_url
 from auth import _hash_password, _verify_password
 
 
@@ -13,29 +13,145 @@ class BackendTests(unittest.TestCase):
     def test_health_is_available_without_provider_credentials(self):
         response = TestClient(app).get("/health")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"status": "ok"})
+        self.assertEqual(response.json()["status"], "ok")
+        self.assertIn("model", response.json())
 
-    def test_chat_reports_missing_key_instead_of_faking_a_reply(self):
-        with patch.dict(os.environ, {"NEBIUS_API_KEY": ""}):
+    def test_chat_reports_missing_gemini_key_instead_of_faking_a_reply(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}):
             response = TestClient(app).post(
                 "/chat",
                 json={"mode": "AUTO", "messages": [{"role": "user", "content": "Hi"}]},
             )
         self.assertEqual(response.status_code, 503)
-        self.assertIn("NEBIUS_API_KEY", response.json()["detail"])
+        self.assertIn("GEMINI_API_KEY", response.json()["detail"])
 
-    def test_mode_selects_provider_instruction_and_model(self):
+    def test_mode_selects_gemini_instruction_temperature_and_roles(self):
         request = ChatRequest(
             mode="PRECISE",
-            messages=[{"role": "user", "content": "Explain this briefly."}],
+            messages=[
+                {"role": "user", "content": "Explain this briefly."},
+                {"role": "assistant", "content": "A short answer."},
+            ],
         )
-        with patch.dict(os.environ, {"NEBIUS_MODEL": "test/model"}):
-            payload = provider_payload(request)
+        payload = gemini_payload(request)
 
-        self.assertEqual(payload["model"], "test/model")
-        self.assertEqual(payload["temperature"], 0.2)
-        self.assertEqual(payload["messages"][0]["role"], "system")
-        self.assertEqual(payload["messages"][1]["role"], "user")
+        self.assertIn("direct, factual, concise", payload["systemInstruction"]["parts"][0]["text"])
+        self.assertEqual(payload["generationConfig"]["temperature"], 0.2)
+        self.assertEqual(payload["contents"][0]["role"], "user")
+        self.assertEqual(payload["contents"][1]["role"], "model")
+
+    def test_agent_payload_offers_only_bounded_android_actions(self):
+        request = AgentStepRequest(
+            task="Open settings",
+            screen=[{"id": "e0", "label": "Settings", "clickable": True, "editable": False}],
+            apps=[{"label": "Settings", "package_name": "com.android.settings"}],
+            messages=[{"role": "user", "content": "Open settings"}],
+        )
+
+        payload = agent_payload(request)
+        declarations = payload["tools"][0]["functionDeclarations"]
+
+        self.assertEqual(
+            {function["name"] for function in declarations},
+            {
+                "tap",
+                "type",
+                "scroll",
+                "back",
+                "home",
+                "recents",
+                "notifications",
+                "open_app",
+                "open_url",
+            },
+        )
+        self.assertIn("untrusted data", payload["systemInstruction"]["parts"][0]["text"])
+        self.assertIn("com.android.settings", payload["contents"][-1]["parts"][-1]["text"])
+        self.assertIn("Open settings", payload["contents"][-1]["parts"][-1]["text"])
+
+    def test_blank_model_environment_falls_back_to_the_working_default(self):
+        with patch.dict(os.environ, {"GEMINI_MODEL": ""}):
+            self.assertIn("/models/gemini-3.5-flash:generateContent", gemini_url())
+
+    def test_open_url_action_is_validated(self):
+        fake_gemini = AsyncMock(return_value={
+            "candidates": [{
+                "content": {"parts": [{
+                    "functionCall": {
+                        "name": "open_url",
+                        "args": {
+                            "url": "https://example.com",
+                            "summary": "Open example.com",
+                        },
+                    }
+                }]}
+            }]
+        })
+        with patch("main.call_gemini", fake_gemini):
+            response = TestClient(app).post(
+                "/agent/step",
+                json={"task": "Open example.com", "screen": []},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["action"]["url"], "https://example.com")
+
+    def test_agent_step_returns_validated_gemini_function_call(self):
+        fake_gemini = AsyncMock(return_value={
+            "candidates": [{
+                "content": {"parts": [{
+                    "functionCall": {
+                        "name": "tap",
+                        "args": {
+                            "target_id": "e0",
+                            "target_label": "Settings",
+                            "summary": "Open Settings",
+                        },
+                    }
+                }]}
+            }]
+        })
+        with patch("main.call_gemini", fake_gemini):
+            response = TestClient(app).post(
+                "/agent/step",
+                json={
+                    "task": "Open settings",
+                    "screen": [{
+                        "id": "e0",
+                        "label": "Settings",
+                        "clickable": True,
+                        "editable": False,
+                    }],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "type": "action",
+            "action": {
+                "type": "tap",
+                "target_id": "e0",
+                "target_label": "Settings",
+                "summary": "Open Settings",
+            },
+        })
+
+    def test_agent_step_rejects_malformed_function_call(self):
+        fake_gemini = AsyncMock(return_value={
+            "candidates": [{
+                "content": {"parts": [{
+                    "functionCall": {"name": "tap", "args": {"summary": "Tap"}}
+                }]}
+            }]
+        })
+        with patch("main.call_gemini", fake_gemini):
+            response = TestClient(app).post(
+                "/agent/step",
+                json={"task": "Tap", "screen": []},
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("invalid action", response.json()["detail"])
 
     def test_signup_login_me_and_logout(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(

@@ -45,7 +45,7 @@ class AuthClient(backendUrl: String) {
 
     fun oauthStartUrl(provider: String): String {
         require(provider in SUPPORTED_PROVIDERS) { "Unsupported sign-in provider." }
-        require(baseUrl.isNotBlank()) { "Set a valid backend URL in Settings before signing in." }
+        require(baseUrl.isNotBlank()) { "This build does not include an Oeil service address." }
         return "$baseUrl/auth/oauth/$provider/start?redirect_uri=$APP_REDIRECT_URI"
     }
 
@@ -55,7 +55,7 @@ class AuthClient(backendUrl: String) {
         token: String? = null,
     ): JSONObject {
         if (baseUrl.isBlank()) {
-            throw IOException("Set the backend URL in Settings before signing in.")
+            throw IOException("This build does not include an Oeil service address.")
         }
         val connection = URL("$baseUrl$path").openConnection() as HttpURLConnection
         try {

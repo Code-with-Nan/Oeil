@@ -39,6 +39,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -62,9 +63,12 @@ import com.example.oeil.components.MessageItem
 import com.example.oeil.components.OeilTouch
 import com.example.oeil.components.TypingIndicator
 import com.example.oeil.data.ConversationReplySource
+import com.example.oeil.data.AndroidActionExecutor
+import com.example.oeil.data.AndroidAgentSource
 import com.example.oeil.data.local.OeilDatabase
 import com.example.oeil.model.User
 import com.example.oeil.state.OeilChatState
+import com.example.oeil.system.OeilAccessibility
 import com.example.oeil.ui.theme.BackgroundDark
 import com.example.oeil.ui.theme.SurfaceDrawer
 import com.example.oeil.ui.theme.SurfaceElevated
@@ -82,6 +86,8 @@ fun OeilScreen(
     user: User,
     replySource: ConversationReplySource,
     store: OeilDatabase,
+    androidAgentSource: AndroidAgentSource? = null,
+    androidActionExecutor: AndroidActionExecutor? = null,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -89,7 +95,9 @@ fun OeilScreen(
         OeilChatState(
             replySource = replySource,
             store = store,
-            userId = user.id
+            userId = user.id,
+            androidAgentSource = androidAgentSource,
+            androidActionExecutor = androidActionExecutor
         )
     }
     val listState = rememberLazyListState()
@@ -98,6 +106,8 @@ fun OeilScreen(
     val snackbar = remember { SnackbarHostState() }
     val composerFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
+    val accessibilityConnected by OeilAccessibility.connected.collectAsState()
     val clipboard = LocalContext.current.getSystemService(ClipboardManager::class.java)
 
     val notice: (String) -> Unit = { message ->
@@ -108,6 +118,11 @@ fun OeilScreen(
     }
 
     LaunchedEffect(chat) { chat.loadHistory() }
+    LaunchedEffect(accessibilityConnected) {
+        // System control is available as soon as the user enables the service;
+        // turning it off in the header stays off until the service reconnects.
+        chat.setAndroidMode(accessibilityConnected)
+    }
     DisposableEffect(chat) {
         onDispose { chat.close() }
     }
@@ -181,7 +196,18 @@ fun OeilScreen(
                         },
                         onNewChat = chat::startNewChat,
                         mode = chat.mode,
-                        onModeClick = chat::cycleMode
+                        onModeClick = chat::cycleMode,
+                        androidMode = chat.androidMode,
+                        accessibilityConnected = accessibilityConnected,
+                        onAndroidClick = {
+                            if (accessibilityConnected) {
+                                chat.setAndroidMode(!chat.androidMode)
+                                notice(if (chat.androidMode) "Android control on" else "Android control off")
+                            } else {
+                                context.startActivity(OeilAccessibility.accessibilitySettingsIntent())
+                                notice("Enable Oeil Android control, then return here")
+                            }
+                        }
                     )
                 },
                 bottomBar = {
