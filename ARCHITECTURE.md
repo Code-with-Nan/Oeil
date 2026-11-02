@@ -13,7 +13,8 @@ OeilScreen
               └── BackendReplySource
                     └── POST {backend URL}/chat
                           └── Python FastAPI backend
-                                                                              └── Gemini generateContent
+                                └── NVIDIA NIM chat completions
+```
 
 Android control path:
 
@@ -22,7 +23,7 @@ OeilChatState (maximum 8 steps)
       ├── OeilAccessibility.screenElements()
       ├── OeilAccessibility.installedApps()
       ├── POST {backend URL}/agent/step
-      │     └── Gemini function calling (fixed action declarations)
+      │     └── NVIDIA NIM tool calling (fixed action declarations)
       ├── OeilAccessibility.approveAndPerform()
       │     └── Android Accessibility approval overlay
       └── OeilAccessibility.updateTaskStatus()
@@ -32,7 +33,7 @@ OeilChatState (maximum 8 steps)
 The Android client sends the last 20 text messages, the selected response mode,
 visible screen elements, and the launchable app list. It does not send an account
 token or provider API key. The backend adds a mode-specific system prompt and keeps
-`GEMINI_API_KEY` on the server. The relay URL is configured at build time, not
+`NVIDIA_API_KEY` on the server. The relay URL is configured at build time, not
 in the UI; an unconfigured build or missing provider key produces an explicit
 error, and the running app never silently falls back to mock replies.
 
@@ -49,7 +50,7 @@ error, and the running app never silently falls back to mock replies.
 | `BackendReplySource` | JSON HTTP client for the Python `/chat` endpoint |
 | `OeilDatabase` | SQLite local profile, threads, messages and settings |
 | `backend/auth.py` | Password hashing, revocable sessions and provider OAuth |
-| `backend/main.py` | Validates chat and agent requests and calls Gemini |
+| `backend/main.py` | Validates chat and agent requests and calls NVIDIA model |
 
 `MockConversationReplySource` remains available for unit tests; it is not wired
 into the installed app.
@@ -72,13 +73,13 @@ provider client credentials on the server. OAuth requires a public HTTPS backend
 
 Configuration is read from the backend process environment:
 
-- `GEMINI_API_KEY` is required and must never be placed in Android resources,
+- `NVIDIA_API_KEY` is required and must never be placed in Android resources,
   Gradle properties, or the APK.
-- `GEMINI_API_BASE_URL` defaults to `https://generativelanguage.googleapis.com/v1beta`.
-- `GEMINI_MODEL` defaults to `gemini-3.5-flash`.
+- `NVIDIA_BASE_URL` defaults to `https://integrate.api.nvidia.com/v1`.
+- `NVIDIA_MODEL` defaults to `nvidia/nemotron-3.5-lightning-30b-a3b`.
 
 `POST /agent/step` accepts a task, the recent conversation, up to 100 visible
-screen elements, and up to 300 launchable apps. Gemini may return one of nine
+screen elements, and up to 300 launchable apps. NVIDIA model may return one of nine
 declared actions (`tap`, `type`, `scroll`, `back`, `home`, `recents`,
 `notifications`, `open_app`, `open_url`) or a final message. Apps can be selected
 by package name or visible label. The app re-reads the screen between steps and

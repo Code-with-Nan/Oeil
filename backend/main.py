@@ -1,15 +1,16 @@
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Literal
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from auth import router as auth_router
-from openai import AsyncOpenAI
+
 # The project keeps provider credentials in backend/.env. Load it automatically
 # so `uvicorn main:app` works without an extra --env-file flag.
 try:
@@ -42,8 +43,8 @@ ActionType = Literal[
     "open_url",
 ]
 
-DEFAULT_MODEL = "gemini-3.5-flash"
-DEFAULT_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 MAX_HISTORY_MESSAGES = 20
 
 SYSTEM_PROMPTS = {
@@ -71,11 +72,11 @@ AGENT_FUNCTIONS = [
         "name": "tap",
         "description": "Tap a visible, clickable screen element by its supplied id.",
         "parameters": {
-            "type": "OBJECT",
+            "type": "object",
             "properties": {
-                "target_id": {"type": "STRING"},
-                "target_label": {"type": "STRING"},
-                "summary": {"type": "STRING"},
+                "target_id": {"type": "string"},
+                "target_label": {"type": "string"},
+                "summary": {"type": "string"},
             },
             "required": ["target_id", "target_label", "summary"],
         },
@@ -84,12 +85,12 @@ AGENT_FUNCTIONS = [
         "name": "type",
         "description": "Enter ordinary, non-sensitive text into a visible editable field.",
         "parameters": {
-            "type": "OBJECT",
+            "type": "object",
             "properties": {
-                "target_id": {"type": "STRING"},
-                "target_label": {"type": "STRING"},
-                "text": {"type": "STRING"},
-                "summary": {"type": "STRING"},
+                "target_id": {"type": "string"},
+                "target_label": {"type": "string"},
+                "text": {"type": "string"},
+                "summary": {"type": "string"},
             },
             "required": ["target_id", "target_label", "text", "summary"],
         },
@@ -98,10 +99,10 @@ AGENT_FUNCTIONS = [
         "name": "scroll",
         "description": "Scroll the current screen forward or backward.",
         "parameters": {
-            "type": "OBJECT",
+            "type": "object",
             "properties": {
-                "direction": {"type": "STRING", "enum": ["forward", "backward"]},
-                "summary": {"type": "STRING"},
+                "direction": {"type": "string", "enum": ["forward", "backward"]},
+                "summary": {"type": "string"},
             },
             "required": ["direction", "summary"],
         },
@@ -110,8 +111,8 @@ AGENT_FUNCTIONS = [
         "name": "back",
         "description": "Navigate back one screen.",
         "parameters": {
-            "type": "OBJECT",
-            "properties": {"summary": {"type": "STRING"}},
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
             "required": ["summary"],
         },
     },
@@ -119,8 +120,8 @@ AGENT_FUNCTIONS = [
         "name": "home",
         "description": "Go to the Android home screen.",
         "parameters": {
-            "type": "OBJECT",
-            "properties": {"summary": {"type": "STRING"}},
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
             "required": ["summary"],
         },
     },
@@ -128,8 +129,8 @@ AGENT_FUNCTIONS = [
         "name": "recents",
         "description": "Open the Android recent-apps switcher.",
         "parameters": {
-            "type": "OBJECT",
-            "properties": {"summary": {"type": "STRING"}},
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
             "required": ["summary"],
         },
     },
@@ -137,8 +138,8 @@ AGENT_FUNCTIONS = [
         "name": "notifications",
         "description": "Open the Android notification shade.",
         "parameters": {
-            "type": "OBJECT",
-            "properties": {"summary": {"type": "STRING"}},
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
             "required": ["summary"],
         },
     },
@@ -146,11 +147,11 @@ AGENT_FUNCTIONS = [
         "name": "open_app",
         "description": "Open an installed app by its package name or by its visible app name.",
         "parameters": {
-            "type": "OBJECT",
+            "type": "object",
             "properties": {
-                "package_name": {"type": "STRING"},
-                "app_name": {"type": "STRING"},
-                "summary": {"type": "STRING"},
+                "package_name": {"type": "string"},
+                "app_name": {"type": "string"},
+                "summary": {"type": "string"},
             },
             "required": ["summary"],
         },
@@ -159,42 +160,55 @@ AGENT_FUNCTIONS = [
         "name": "open_url",
         "description": "Open an http or https link in the device browser.",
         "parameters": {
-            "type": "OBJECT",
+            "type": "object",
             "properties": {
-                "url": {"type": "STRING"},
-                "summary": {"type": "STRING"},
+                "url": {"type": "string"},
+                "summary": {"type": "string"},
             },
             "required": ["url", "summary"],
         },
     },
 ]
 
+NVIDIA_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": fn["name"],
+            "description": fn["description"],
+            "parameters": fn["parameters"],
+        },
+    }
+    for fn in AGENT_FUNCTIONS
+]
+
 
 def env_value(name: str, default: str = "") -> str:
     """Return a trimmed environment value, treating blank as unset."""
     return (os.getenv(name) or "").strip() or default
-# NVIDIA configuration
-NVIDIA_API_KEY = env_value("NVIDIA_API_KEY")
 
-NVIDIA_MODEL = env_value(
-    "NVIDIA_MODEL",
-    "nvidia/nemotron-3.5-lightning-30b-a3b"
-)
 
-# NVIDIA configuration
-NVIDIA_API_KEY = env_value("NVIDIA_API_KEY")
+def nvidia_model_name() -> str:
+    return env_value("NVIDIA_MODEL", DEFAULT_MODEL)
 
-NVIDIA_MODEL = env_value(
-    "NVIDIA_MODEL",
-    "nvidia/nemotron-3.5-lightning-30b-a3b"
-)
 
-nvidia_client = AsyncOpenAI(
-    base_url="https://integrate.api.nvidia.com/v1",
-    api_key=NVIDIA_API_KEY or "missing-api-key"
-)
-    
-    
+def nvidia_base_url() -> str:
+    return env_value("NVIDIA_BASE_URL", env_value("NVIDIA_API_BASE_URL", DEFAULT_BASE_URL))
+
+
+def get_nvidia_client() -> AsyncOpenAI:
+    api_key = env_value("NVIDIA_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="NVIDIA is not configured. Set NVIDIA_API_KEY in backend/.env.",
+        )
+    return AsyncOpenAI(
+        base_url=nvidia_base_url(),
+        api_key=api_key,
+    )
+
+
 class ChatMessage(BaseModel):
     role: Role
     content: str = Field(min_length=1, max_length=16_000)
@@ -237,24 +251,17 @@ class AgentAction(BaseModel):
     url: str | None = Field(default=None, max_length=2_000)
 
 
-def gemini_payload(request: ChatRequest) -> dict:
-    return {
-        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPTS[request.mode]}]},
-        "contents": [
-            {
-                "role": "model" if message.role == "assistant" else "user",
-                "parts": [{"text": message.content}],
-            }
+def nvidia_chat_messages(request: ChatRequest) -> list[dict]:
+    return [
+        {"role": "system", "content": SYSTEM_PROMPTS[request.mode]},
+        *[
+            {"role": message.role, "content": message.content}
             for message in request.messages
         ],
-        "generationConfig": {
-            "temperature": TEMPERATURES[request.mode],
-            "maxOutputTokens": 2048,
-        },
-    }
+    ]
 
 
-def agent_payload(request: AgentStepRequest) -> dict:
+def nvidia_agent_messages(request: AgentStepRequest) -> list[dict]:
     screen = [element.model_dump() for element in request.screen]
     apps = [app.model_dump() for app in request.apps]
     state = (
@@ -264,159 +271,109 @@ def agent_payload(request: AgentStepRequest) -> dict:
     )
 
     contents = [
-        {
-            "role": "model" if message.role == "assistant" else "user",
-            "parts": [{"text": message.content}],
-        }
-        for message in request.messages[-MAX_HISTORY_MESSAGES:]
+        {"role": "system", "content": AGENT_INSTRUCTIONS},
+        *[
+            {"role": message.role, "content": message.content}
+            for message in request.messages[-MAX_HISTORY_MESSAGES:]
+        ],
     ]
     if contents and contents[-1]["role"] == "user":
-        contents[-1]["parts"].append({"text": state})
+        contents[-1]["content"] = f"{contents[-1]['content']}\n\n{state}"
     else:
-        contents.append({"role": "user", "parts": [{"text": state}]})
+        contents.append({"role": "user", "content": state})
 
-    return {
-        "systemInstruction": {"parts": [{"text": AGENT_INSTRUCTIONS}]},
-        "contents": contents,
-        "tools": [{"functionDeclarations": AGENT_FUNCTIONS}],
-        "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}},
-        "generationConfig": {
-            "temperature": TEMPERATURES[request.mode],
-            "maxOutputTokens": 2048,
-        },
-    }
-
-
-def gemini_url() -> str:
-    base_url = env_value("GEMINI_API_BASE_URL", DEFAULT_API_BASE_URL).rstrip("/")
-    model = env_value("GEMINI_MODEL", DEFAULT_MODEL)
-    if not model or "/" in model or " " in model:
-        raise HTTPException(status_code=503, detail="GEMINI_MODEL is invalid.")
-    return f"{base_url}/models/{model}:generateContent"
-
-
-async def call_gemini(payload: dict) -> dict:
-    api_key = env_value("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="Gemini is not configured. Set GEMINI_API_KEY in backend/.env.",
-        )
-
-    url = gemini_url()
-    last_status: int | None = None
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        for attempt in range(3):
-            try:
-                response = await client.post(
-                    url,
-                    headers={"x-goog-api-key": api_key},
-                    json=payload,
-                )
-            except httpx.RequestError as error:
-                if attempt == 2:
-                    raise HTTPException(
-                        status_code=502,
-                        detail="Could not connect to the Gemini API. Check the backend network.",
-                    ) from error
-                await asyncio.sleep(1.5 * (attempt + 1))
-                continue
-
-            if response.is_success:
-                try:
-                    return response.json()
-                except ValueError as error:
-                    raise HTTPException(
-                        status_code=502, detail="Gemini returned an unreadable response."
-                    ) from error
-
-            last_status = response.status_code
-            if response.status_code == 404:
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        "The configured Gemini model is unavailable. Set GEMINI_MODEL "
-                        f"to a supported model (default: {DEFAULT_MODEL})."
-                    ),
-                )
-            if response.status_code in (401, 403):
-                raise HTTPException(
-                    status_code=502,
-                    detail="Gemini rejected the API key. Check GEMINI_API_KEY on the backend.",
-                )
-            if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-                await asyncio.sleep(1.5 * (attempt + 1))
-                continue
-            break
-
-    raise HTTPException(
-        status_code=502,
-        detail=f"Gemini API request failed (HTTP {last_status}). Please try again.",
-    )
-
-
-def response_parts(response: dict) -> list[dict]:
-    try:
-        candidate = response["candidates"][0]
-        parts = candidate["content"]["parts"]
-        if not isinstance(parts, list):
-            raise TypeError
-        return parts
-    except (KeyError, IndexError, TypeError) as error:
-        reason = ""
-        try:
-            reason = response["candidates"][0].get("finishReason", "")
-        except (KeyError, IndexError, TypeError):
-            reason = response.get("promptFeedback", {}).get("blockReason", "")
-        detail = "Gemini returned an unreadable response."
-        if reason:
-            detail += f" (reason: {reason})"
-        raise HTTPException(status_code=502, detail=detail) from error
+    return contents
 
 
 @app.get("/health")
 async def health() -> dict:
     return {
         "status": "ok",
-        "model": env_value("GEMINI_MODEL", DEFAULT_MODEL),
-        "ai_configured": bool(env_value("GEMINI_API_KEY")),
+        "model": nvidia_model_name(),
+        "ai_configured": bool(env_value("NVIDIA_API_KEY")),
     }
 
 
 @app.post("/chat")
 async def chat(request: ChatRequest) -> dict[str, str]:
-    response = await call_gemini(gemini_payload(request))
-    reply = "".join(
-        part.get("text", "")
-        for part in response_parts(response)
-        if isinstance(part, dict)
-    )
-    if not reply.strip():
-        raise HTTPException(status_code=502, detail="Gemini returned an empty reply.")
-    return {"reply": reply.strip()}
+    client = get_nvidia_client()
+    model = nvidia_model_name()
+    messages = nvidia_chat_messages(request)
+
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=TEMPERATURES[request.mode],
+            max_tokens=2048,
+        )
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"NVIDIA API request failed: {getattr(error, 'message', str(error))}",
+        ) from error
+
+    reply = (response.choices[0].message.content or "").strip()
+    if not reply:
+        raise HTTPException(status_code=502, detail="NVIDIA returned an empty reply.")
+    return {"reply": reply}
 
 
 @app.post("/agent/step")
 async def agent_step(request: AgentStepRequest) -> dict:
-    response = await call_gemini(agent_payload(request))
-    parts = response_parts(response)
-    for part in parts:
-        if not isinstance(part, dict):
-            continue
-        call = part.get("functionCall")
-        if not isinstance(call, dict):
-            continue
-        name = call.get("name")
-        args = call.get("args")
-        if (
-            name not in {function["name"] for function in AGENT_FUNCTIONS}
-            or not isinstance(args, dict)
-        ):
-            raise HTTPException(status_code=502, detail="Gemini returned an unsupported action.")
+    client = get_nvidia_client()
+    model = nvidia_model_name()
+    messages = nvidia_agent_messages(request)
+
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            tools=NVIDIA_TOOLS,
+            tool_choice="auto",
+            temperature=TEMPERATURES[request.mode],
+            max_tokens=2048,
+        )
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"NVIDIA API request failed: {getattr(error, 'message', str(error))}",
+        ) from error
+
+    choice = response.choices[0]
+    message = choice.message
+
+    if message.tool_calls:
+        tool_call = message.tool_calls[0]
+        name = tool_call.function.name
+        raw_args = tool_call.function.arguments
+        if isinstance(raw_args, str):
+            try:
+                args = json.loads(raw_args)
+            except json.JSONDecodeError as error:
+                raise HTTPException(
+                    status_code=502, detail="NVIDIA returned an invalid action."
+                ) from error
+        elif isinstance(raw_args, dict):
+            args = raw_args
+        else:
+            args = {}
+
+        if name not in {fn["name"] for fn in AGENT_FUNCTIONS} or not isinstance(args, dict):
+            raise HTTPException(
+                status_code=502, detail="NVIDIA returned an unsupported action."
+            )
+
         try:
             action = AgentAction.model_validate({**args, "type": name})
         except ValueError as error:
-            raise HTTPException(status_code=502, detail="Gemini returned an invalid action.") from error
+            raise HTTPException(
+                status_code=502, detail="NVIDIA returned an invalid action."
+            ) from error
 
         required_fields = {
             "tap": ("target_id", "target_label"),
@@ -425,18 +382,19 @@ async def agent_step(request: AgentStepRequest) -> dict:
             "open_url": ("url",),
         }.get(name, ())
         if any(not getattr(action, field) for field in required_fields):
-            raise HTTPException(status_code=502, detail="Gemini returned an invalid action.")
+            raise HTTPException(
+                status_code=502, detail="NVIDIA returned an invalid action."
+            )
         if name == "open_app" and not (action.package_name or action.app_name):
-            raise HTTPException(status_code=502, detail="Gemini returned an invalid action.")
+            raise HTTPException(
+                status_code=502, detail="NVIDIA returned an invalid action."
+            )
         if name == "open_url" and not action.url.lower().startswith(("http://", "https://")):
-            raise HTTPException(status_code=502, detail="Gemini returned an unsafe link.")
+            raise HTTPException(status_code=502, detail="NVIDIA returned an unsafe link.")
+
         return {"type": "action", "action": action.model_dump(exclude_none=True)}
 
-    reply = "".join(
-        part.get("text", "")
-        for part in parts
-        if isinstance(part, dict)
-    ).strip()
+    reply = (message.content or "").strip()
     if not reply:
-        raise HTTPException(status_code=502, detail="Gemini returned an empty agent step.")
+        raise HTTPException(status_code=502, detail="NVIDIA returned an empty agent step.")
     return {"type": "message", "message": reply}

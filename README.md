@@ -1,145 +1,170 @@
 # Oeil
 
-Oeil is an Android chat assistant built with Jetpack Compose. It provides local
-conversation history, Gemini-powered replies through a Python relay, and an
-optional Android Accessibility Service for user-approved screen actions.
+**An Android assistant that can actually use your phone — with your approval.**
 
-## What works today
+Oeil is a Jetpack Compose Android app backed by a small Python relay. It chats
+with a model API, and when you enable Android control it can read the visible
+screen and perform one approved action at a time: open an app, tap a button,
+type text, scroll, go back, and more.
 
-- Compose chat UI with conversation history stored locally in SQLite.
-- Account settings with email/password sign-up and sign-in, plus Google,
-  Microsoft and GitHub OAuth sign-in.
-- Light, dark and system appearance options saved on the device.
-- Auto, Precise and Creative response modes.
-- A Python FastAPI relay that calls Gemini and keeps the provider key off-device.
-- Optional Android control for reading visible screen labels and opening apps,
-  tapping controls, entering ordinary text, scrolling, navigating Back, going
-  home, opening recent apps, opening notifications, and opening links. Each
-  action requires approval in an Android system overlay; tasks stop after eight
-  actions. Accessibility control is opt-in in Android Settings.
-- The app is pre-pointed at an Oeil service at build time, so users never enter
-  an API URL or key. The provider key stays on the backend and is never compiled
-  into or sent from the APK.
-- Text replies, stop generation, conversation search, and voice dictation.
+## What it does
 
-## Run the Python backend
+- **Chat assistant** with local conversation history.
+- **Android control** through an Accessibility Service: open apps, tap controls,
+  enter ordinary text, scroll, go Back, go Home, open recent apps, open
+  notifications, and open links. Every action requires explicit approval.
+- **Floating progress pill** while Oeil works in another app.
+- **No API URL or key setup** in the app; the backend URL is compiled in.
+- **Provider key stays on the backend**, never in the APK.
+- **Accounts** with email/password and Google, Microsoft or GitHub sign-in.
+- **Light, dark and system themes**, plus Auto, Precise and Creative reply modes.
+- **Voice dictation**, stop generation and conversation search.
 
-Requirements: Python 3.10+. A Gemini API key is required for chat
-replies; account endpoints work independently.
+Supported model provider: **NVIDIA NIM AI** (OpenAI-compatible).
+
+## The idea
+
+Most assistants answer questions but cannot act on your phone. Fully automatic
+phone control is powerful but also risky. Oeil takes a middle path:
+
+1. The model proposes **one small action**.
+2. Android shows **exactly what will happen**.
+3. You approve or deny it.
+4. The result is sent back, and Oeil decides what to do next.
+
+The Accessibility Service reads the accessibility tree — labels, IDs, clickable/
+editable flags, installed apps — **not screenshots**. Password fields are excluded.
+If you deny an action, the task stops. Tasks stop after eight actions.
+
+## See it in action
+
+1. Ask **“Open Settings.”**
+2. Oeil shows an approval card for the Settings app.
+3. Tap **Allow** — Settings opens, the floating pill shows Oeil is working.
+4. Ask **“Go home.”**
+5. Allow the action — the phone returns to the launcher.
+6. Deny an action to show that Oeil stops immediately.
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Android app | Kotlin, Jetpack Compose, SQLite |
+| Device control | Android Accessibility Service |
+| Backend | Python 3.10+, FastAPI, Uvicorn |
+| Model provider | NVIDIA NIM AI (OpenAI-compatible) |
+| Build | Gradle 9.8, AGP 9.4, compileSdk 37 |
+
+## Quick start
+
+### 1. Run the backend
+
+Requirements: Python 3.10+ and an NVIDIA API key.
 
 ```bash
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # or create .env with GEMINI_API_KEY=...
-# GEMINI_API_KEY=your-Gemini-key
-# OEIL_AUTH_SECRET=$(openssl rand -hex 32)
+cp .env.example .env
+
+# Edit .env and set your NVIDIA API key:
+#   NVIDIA_API_KEY=your-nvidia-key
+# Optional model override:
+#   NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-`backend/.env` is loaded automatically. Shell environment variables take
-precedence over the file. A blank `GEMINI_MODEL` falls back to the working
-default.
-
-The auth database is stored in `backend/oeil-auth.sqlite3` by default. Set
-`OEIL_AUTH_DB_PATH` to choose another persistent location. `OEIL_AUTH_SECRET`
-must be a stable random secret of at least 32 characters; changing it invalidates
-existing sessions.
-
-To enable provider sign-in, serve the backend over HTTPS, set
-`OEIL_PUBLIC_BASE_URL` to its public origin, and configure each provider's client
-ID and secret on the backend only:
-
-| Provider | Environment variables | Provider callback URL |
-|---|---|---|
-| Google | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | `{OEIL_PUBLIC_BASE_URL}/auth/oauth/google/callback` |
-| Microsoft | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | `{OEIL_PUBLIC_BASE_URL}/auth/oauth/microsoft/callback` |
-| GitHub | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | `{OEIL_PUBLIC_BASE_URL}/auth/oauth/github/callback` |
-
-The Android app receives OAuth sessions through the `oeil://auth/callback`
-application link. Do not put provider secrets in the Android app or commit them.
-
-The backend defaults to the Gemini API and model:
-
-- API base URL: `https://generativelanguage.googleapis.com/v1beta`
-- Model: `gemini-3.5-flash`
-
-Override with `GEMINI_API_BASE_URL` or `GEMINI_MODEL` if needed. `GET /health`
-checks the relay and reports the configured model; `POST /chat` serves normal
-chat and `POST /agent/step` returns one bounded Android action or a final text
-response.
-
-**Use HTTPS and configure `OEIL_AUTH_SECRET` before deploying publicly.** The
-email/password and OAuth account endpoints issue revocable bearer sessions.
-`/chat` remains available to local/guest profiles and does not currently require
-an account token; add rate limiting and enforce authentication before exposing a
-production service.
-
-## Point the app at the backend
-
-The app has no API/URL field. Its service address is compiled in from the
-`oeilBackendUrl` Gradle property, `OEIL_BACKEND_URL`, or the default
-`http://10.0.2.2:8000` (Android emulator loopback):
+Check it:
 
 ```bash
+curl http://127.0.0.1:8000/health
+```
+
+### 2. Build and install the Android app
+
+```bash
+./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+Open Oeil, then enable **Oeil Android control** in Android Accessibility
+settings. Control turns on automatically once the service connects.
+
+### 3. Point the app at your backend
+
+The app has no URL field. The address is compiled in at build time:
+
+```bash
+# Default backend URL: https://oeil.onrender.com
+./gradlew assembleDebug
+
+# Real deployment
 ./gradlew assembleDebug -PoeilBackendUrl=https://oeil.example.com
 # or
 OEIL_BACKEND_URL=https://oeil.example.com ./gradlew assembleDebug
 ```
 
-Keep `GEMINI_API_KEY` on the backend; never put it in the Android app. To control
-other apps, enable **Oeil Android control** in the system Accessibility settings.
-Android control turns on automatically once the service is connected, and the
-phone icon in the chat header toggles it. Screen labels and the installed-app list
-are sent to the backend while Android control is active. While a task runs outside
-Oeil, a small floating progress banner shows what Oeil is currently doing.
+## Configuration
 
-This is not unrestricted control: Android only exposes accessible screen content,
-secure fields are excluded, unsupported actions are not available, and every
-action displays its exact target/content for approval. Vision screenshots,
-gesture recording, and app-specific integrations are not implemented.
-Accessibility use for general assistant automation may not meet Google Play
-policy requirements; check current store policy before release.
+`backend/.env` is loaded automatically. Shell environment variables take
+precedence over the file. A blank `NVIDIA_MODEL` falls back to the default (`nvidia/nemotron-3.5-lightning-30b-a3b`).
 
-## Android build
+| Variable | Purpose |
+|---|---|
+| `NVIDIA_API_KEY` | Provider API key (required) |
+| `NVIDIA_MODEL` | Model name |
+| `NVIDIA_BASE_URL` | Provider base URL |
+| `OEIL_AUTH_SECRET` | Stable secret for account sessions |
+| `OEIL_AUTH_DB_PATH` | Optional path for the auth database |
+| `OEIL_PUBLIC_BASE_URL` | Public HTTPS origin used for OAuth callbacks |
 
-Requirements: Android Studio with a full JDK 17+ (one that includes `jlink`)
-and Android SDK 37. The Gradle daemon is pinned to Oracle JDK 25; Gradle
-downloads it automatically on the first build if it is not installed.
+Accounts use email/password, Google, Microsoft or GitHub sign-in. Configure
+provider OAuth secrets on the backend only. The app receives OAuth sessions
+through `oeil://auth/callback`. Never put provider keys in the app or commit them
+to Git.
+
+## Safety and privacy
+
+- Every Android action requires explicit approval.
+- The model cannot enter passwords, payment details or security codes.
+- Only accessible screen data is sent: labels, IDs, clickable/editable flags,
+  and the launchable app list. Image bytes are not sent.
+- Provider keys stay on the backend.
+- Tasks stop after eight actions.
+- The floating status pill only appears while Oeil is working in another app.
+- Check current Google Play policy before release; accessibility use may be
+  restricted.
+
+## Current limitations
+
+- Screenshot vision is not implemented; Oeil relies on accessible labels.
+- No arbitrary touch gestures or gesture recording.
+- No app-specific integrations.
+- Add rate limiting and authentication before public deployment.
+
+## Tests
 
 ```bash
-./gradlew assembleDebug
+cd backend && python3 -m unittest
 ./gradlew test
-```
-
-For emulator local HTTP, the debug network security config permits
-`10.0.2.2`. Release builds require HTTPS.
-
-## Backend tests
-
-```bash
-cd backend
-pip install -r requirements.txt
-python3 -m unittest
 ```
 
 ## Project layout
 
 ```text
 app/src/main/java/com/example/oeil/
-├── OeilApp.kt                 # Local profile, settings, account and dependency wiring
-├── data/                      # Relay/auth clients, endpoint validation, SQLite store
+├── OeilApp.kt                 # Profile, settings, account and wiring
+├── data/                      # Relay/auth clients, SQLite store
 ├── screen/                    # Chat, appearance, account and settings screens
 ├── state/                     # Conversation state and reply orchestration
-├── system/                    # Android Accessibility Service and approvals
-├── components/                # Chat UI components
-└── model/                     # Messages, threads, and local profile
+├── system/                    # Accessibility Service, approvals, status pill
+├── components/              # Chat UI components
+└── model/                     # Messages, threads and local profile
 backend/
-├── main.py                    # FastAPI relay to Gemini and the Android agent
+├── main.py                    # FastAPI relay to NVIDIA model provider and agent
 ├── auth.py                    # Password, bearer session and OAuth endpoints
 └── test_main.py               # Backend contract and auth tests
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the current data flow and
-[PLAN.md](PLAN.md) for the planned AAS and vision work.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for data flow.

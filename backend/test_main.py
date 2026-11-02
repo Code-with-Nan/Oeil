@@ -1,31 +1,43 @@
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from main import AgentStepRequest, ChatRequest, agent_payload, app, gemini_payload, gemini_url
 from auth import _hash_password, _verify_password
+from main import (
+    DEFAULT_MODEL,
+    AgentStepRequest,
+    ChatRequest,
+    NVIDIA_TOOLS,
+    app,
+    nvidia_agent_messages,
+    nvidia_chat_messages,
+    nvidia_model_name,
+)
 
 
 class BackendTests(unittest.TestCase):
     def test_health_is_available_without_provider_credentials(self):
-        response = TestClient(app).get("/health")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["status"], "ok")
-        self.assertIn("model", response.json())
+        with patch.dict(os.environ, {"NVIDIA_API_KEY": ""}):
+            response = TestClient(app).get("/health")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["status"], "ok")
+            self.assertEqual(response.json()["model"], DEFAULT_MODEL)
+            self.assertFalse(response.json()["ai_configured"])
 
-    def test_chat_reports_missing_gemini_key_instead_of_faking_a_reply(self):
-        with patch.dict(os.environ, {"GEMINI_API_KEY": ""}):
+    def test_chat_reports_missing_nvidia_key(self):
+        with patch.dict(os.environ, {"NVIDIA_API_KEY": ""}):
             response = TestClient(app).post(
                 "/chat",
                 json={"mode": "AUTO", "messages": [{"role": "user", "content": "Hi"}]},
             )
         self.assertEqual(response.status_code, 503)
-        self.assertIn("GEMINI_API_KEY", response.json()["detail"])
+        self.assertIn("NVIDIA_API_KEY", response.json()["detail"])
 
-    def test_mode_selects_gemini_instruction_temperature_and_roles(self):
+    def test_mode_selects_nvidia_instruction_temperature_and_roles(self):
         request = ChatRequest(
             mode="PRECISE",
             messages=[
@@ -33,12 +45,12 @@ class BackendTests(unittest.TestCase):
                 {"role": "assistant", "content": "A short answer."},
             ],
         )
-        payload = gemini_payload(request)
+        messages = nvidia_chat_messages(request)
 
-        self.assertIn("direct, factual, concise", payload["systemInstruction"]["parts"][0]["text"])
-        self.assertEqual(payload["generationConfig"]["temperature"], 0.2)
-        self.assertEqual(payload["contents"][0]["role"], "user")
-        self.assertEqual(payload["contents"][1]["role"], "model")
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn("direct, factual, concise", messages[0]["content"])
+        self.assertEqual(messages[1]["role"], "user")
+        self.assertEqual(messages[2]["role"], "assistant")
 
     def test_agent_payload_offers_only_bounded_android_actions(self):
         request = AgentStepRequest(
@@ -48,8 +60,8 @@ class BackendTests(unittest.TestCase):
             messages=[{"role": "user", "content": "Open settings"}],
         )
 
-        payload = agent_payload(request)
-        declarations = payload["tools"][0]["functionDeclarations"]
+        messages = nvidia_agent_messages(request)
+        declarations = [tool["function"] for tool in NVIDIA_TOOLS]
 
         self.assertEqual(
             {function["name"] for function in declarations},
@@ -65,29 +77,36 @@ class BackendTests(unittest.TestCase):
                 "open_url",
             },
         )
-        self.assertIn("untrusted data", payload["systemInstruction"]["parts"][0]["text"])
-        self.assertIn("com.android.settings", payload["contents"][-1]["parts"][-1]["text"])
-        self.assertIn("Open settings", payload["contents"][-1]["parts"][-1]["text"])
+        self.assertIn("untrusted data", messages[0]["content"])
+        self.assertIn("com.android.settings", messages[-1]["content"])
+        self.assertIn("Open settings", messages[-1]["content"])
 
     def test_blank_model_environment_falls_back_to_the_working_default(self):
-        with patch.dict(os.environ, {"GEMINI_MODEL": ""}):
-            self.assertIn("/models/gemini-3.5-flash:generateContent", gemini_url())
+        with patch.dict(os.environ, {"NVIDIA_MODEL": ""}):
+            self.assertEqual(nvidia_model_name(), DEFAULT_MODEL)
 
     def test_open_url_action_is_validated(self):
-        fake_gemini = AsyncMock(return_value={
-            "candidates": [{
-                "content": {"parts": [{
-                    "functionCall": {
-                        "name": "open_url",
-                        "args": {
-                            "url": "https://example.com",
-                            "summary": "Open example.com",
-                        },
-                    }
-                }]}
-            }]
-        })
-        with patch("main.call_gemini", fake_gemini):
+        fake_choice = SimpleNamespace(
+            message=SimpleNamespace(
+                content=None,
+                tool_calls=[
+                    SimpleNamespace(
+                        function=SimpleNamespace(
+                            name="open_url",
+                            arguments='{"url": "https://example.com", "summary": "Open example.com"}',
+                        )
+                    )
+                ],
+            )
+        )
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[fake_choice]
+        )
+
+        with patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key"}), patch(
+            "main.get_nvidia_client", return_value=mock_client
+        ):
             response = TestClient(app).post(
                 "/agent/step",
                 json={"task": "Open example.com", "screen": []},
@@ -96,22 +115,28 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["action"]["url"], "https://example.com")
 
-    def test_agent_step_returns_validated_gemini_function_call(self):
-        fake_gemini = AsyncMock(return_value={
-            "candidates": [{
-                "content": {"parts": [{
-                    "functionCall": {
-                        "name": "tap",
-                        "args": {
-                            "target_id": "e0",
-                            "target_label": "Settings",
-                            "summary": "Open Settings",
-                        },
-                    }
-                }]}
-            }]
-        })
-        with patch("main.call_gemini", fake_gemini):
+    def test_agent_step_returns_validated_nvidia_function_call(self):
+        fake_choice = SimpleNamespace(
+            message=SimpleNamespace(
+                content=None,
+                tool_calls=[
+                    SimpleNamespace(
+                        function=SimpleNamespace(
+                            name="tap",
+                            arguments='{"target_id": "e0", "target_label": "Settings", "summary": "Open Settings"}',
+                        )
+                    )
+                ],
+            )
+        )
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[fake_choice]
+        )
+
+        with patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key"}), patch(
+            "main.get_nvidia_client", return_value=mock_client
+        ):
             response = TestClient(app).post(
                 "/agent/step",
                 json={
@@ -137,14 +162,27 @@ class BackendTests(unittest.TestCase):
         })
 
     def test_agent_step_rejects_malformed_function_call(self):
-        fake_gemini = AsyncMock(return_value={
-            "candidates": [{
-                "content": {"parts": [{
-                    "functionCall": {"name": "tap", "args": {"summary": "Tap"}}
-                }]}
-            }]
-        })
-        with patch("main.call_gemini", fake_gemini):
+        fake_choice = SimpleNamespace(
+            message=SimpleNamespace(
+                content=None,
+                tool_calls=[
+                    SimpleNamespace(
+                        function=SimpleNamespace(
+                            name="tap",
+                            arguments='{"summary": "Tap"}',
+                        )
+                    )
+                ],
+            )
+        )
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[fake_choice]
+        )
+
+        with patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key"}), patch(
+            "main.get_nvidia_client", return_value=mock_client
+        ):
             response = TestClient(app).post(
                 "/agent/step",
                 json={"task": "Tap", "screen": []},

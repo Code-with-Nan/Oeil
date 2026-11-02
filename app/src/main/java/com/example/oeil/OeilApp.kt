@@ -289,8 +289,12 @@ private fun BootScreen(modifier: Modifier = Modifier) {
 
 private fun configuredBackendUrl(): String {
     val raw = BuildConfig.OEIL_BACKEND_URL.trim()
-    if (raw.isBlank()) return ""
-    return runCatching { normalizeBackendUrl(raw) }.getOrDefault(raw.trimEnd('/'))
+    val url = if (raw.isBlank() || raw.contains("10.0.2.2") || raw.contains("localhost")) {
+        "https://oeil.onrender.com"
+    } else {
+        raw
+    }
+    return runCatching { normalizeBackendUrl(url) }.getOrDefault("https://oeil.onrender.com")
 }
 
 private const val THEME_MODE_SETTING = "theme_mode"

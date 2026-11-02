@@ -100,6 +100,7 @@ fun OeilScreen(
             androidActionExecutor = androidActionExecutor
         )
     }
+
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)

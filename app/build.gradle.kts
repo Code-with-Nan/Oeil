@@ -7,8 +7,7 @@ plugins {
 // API URL or key. Override for a real deployment with -PoeilBackendUrl=... or
 // the OEIL_BACKEND_URL environment variable.
 val oeilBackendUrl = providers.gradleProperty("oeilBackendUrl").orNull
-    ?: providers.environmentVariable("OEIL_BACKEND_URL").orNull
-    ?: "http://10.0.2.2:8000"
+    ?: "https://oeil.onrender.com"
 
 android {
     namespace = "com.example.oeil"

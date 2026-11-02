@@ -1,13 +1,15 @@
-# Android control: current scope
+# Oeil: current scope and roadmap
 
-Oeil now uses Gemini through the Python relay for chat and Android agent steps.
-Keep `GEMINI_API_KEY` on the backend. The Android app has no URL/API-key field;
+## Android control: current scope
+
+Oeil uses NVIDIA NIM AI (`nvidia/nemotron-3.5-lightning-30b-a3b`) through the Python relay for chat and Android agent steps.
+Keep `NVIDIA_API_KEY` on the backend. The Android app has no URL/API-key field;
 its relay address is compiled in from `oeilBackendUrl`/`OEIL_BACKEND_URL`.
 
 ## Available actions
 
 The app reads visible accessible labels and the list of launchable apps, then
-asks the backend for one step. Gemini can answer normally or request one action:
+asks the backend for one step. The model can answer normally or request one action:
 
 - open an installed app by package name or visible label;
 - tap a visible control;
