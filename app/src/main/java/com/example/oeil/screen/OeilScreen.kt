@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
@@ -65,15 +67,17 @@ import com.example.oeil.components.TypingIndicator
 import com.example.oeil.data.ConversationReplySource
 import com.example.oeil.data.AndroidActionExecutor
 import com.example.oeil.data.AndroidAgentSource
-import com.example.oeil.data.local.OeilDatabase
+import com.example.oeil.data.OeilDatabase
 import com.example.oeil.model.User
 import com.example.oeil.state.OeilChatState
 import com.example.oeil.system.OeilAccessibility
-import com.example.oeil.ui.theme.BackgroundDark
+import com.example.oeil.ui.theme.AccentPrimary
+import com.example.oeil.ui.theme.ChatBackgroundGradient
+import com.example.oeil.ui.theme.OutlineDark
 import com.example.oeil.ui.theme.SurfaceDrawer
-import com.example.oeil.ui.theme.SurfaceElevated
 import com.example.oeil.ui.theme.SurfaceGlass
 import com.example.oeil.ui.theme.TextPrimary
+import com.example.oeil.ui.theme.TopGlowGradient
 import kotlinx.coroutines.launch
 
 /**
@@ -86,10 +90,10 @@ fun OeilScreen(
     user: User,
     replySource: ConversationReplySource,
     store: OeilDatabase,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
     androidAgentSource: AndroidAgentSource? = null,
     androidActionExecutor: AndroidActionExecutor? = null,
-    onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier
 ) {
     val chat = remember(user.id, replySource, store) {
         OeilChatState(
@@ -172,8 +176,15 @@ fun OeilScreen(
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .background(BackgroundDark)
+                .background(ChatBackgroundGradient)
         ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(220.dp)
+                    .align(Alignment.TopCenter)
+                    .background(TopGlowGradient)
+            )
             Scaffold(
                 containerColor = Color.Transparent,
                 snackbarHost = {
@@ -181,8 +192,9 @@ fun OeilScreen(
                         Snackbar(
                             snackbarData = data,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                            containerColor = SurfaceElevated,
+                            containerColor = SurfaceGlass,
                             contentColor = TextPrimary,
+                            actionColor = AccentPrimary,
                             shape = RoundedCornerShape(16.dp)
                         )
                     }
@@ -357,7 +369,8 @@ private fun JumpToLatest(
         OeilTouch(
             onClick = onScroll,
             modifier = Modifier.size(42.dp),
-            color = SurfaceGlass
+            color = SurfaceGlass,
+            borderColor = OutlineDark
         ) {
             Icon(
                 imageVector = Icons.Outlined.ExpandMore,

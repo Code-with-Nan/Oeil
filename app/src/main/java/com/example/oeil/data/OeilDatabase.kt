@@ -1,4 +1,4 @@
-package com.example.oeil.data.local
+package com.example.oeil.data
 
 import android.content.ContentValues
 import android.content.Context

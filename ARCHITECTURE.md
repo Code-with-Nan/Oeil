@@ -43,17 +43,16 @@ error, and the running app never silently falls back to mock replies.
 |---|---|
 | `OeilApp` | Loads the local profile, build-time service URL and settings; opens chat or settings |
 | `OeilScreen` | Chat layout, drawer, message list and composer |
-| `SettingsScreen` | Appearance, account and backend settings |
-| `AuthScreen` | Email/password sign-up and sign-in; launches provider OAuth |
+| `AccountScreens` | Appearance, account, backend settings and sign-in |
 | `AuthClient` | Calls account endpoints and validates OAuth callback sessions |
 | `OeilChatState` | Message/thread state, reply lifecycle and local persistence |
-| `BackendReplySource` | JSON HTTP client for the Python `/chat` endpoint |
+| `BackendReplySource` | JSON HTTP client for the Python `/chat` and `/agent/step` endpoints |
 | `OeilDatabase` | SQLite local profile, threads, messages and settings |
 | `backend/auth.py` | Password hashing, revocable sessions and provider OAuth |
 | `backend/main.py` | Validates chat and agent requests and calls NVIDIA model |
 
-`MockConversationReplySource` remains available for unit tests; it is not wired
-into the installed app.
+The app always uses the live relay; there is no mock reply path in the installed
+build.
 
 ## Backend API
 

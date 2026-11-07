@@ -26,16 +26,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteSweep
-import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,31 +44,33 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.oeil.model.ChatThread
 import com.example.oeil.model.User
+import com.example.oeil.ui.theme.AccentGradient
+import com.example.oeil.ui.theme.AccentGradientSoft
+import com.example.oeil.ui.theme.AccentPrimary
+import com.example.oeil.ui.theme.DividerGradient
 import com.example.oeil.ui.theme.OutlineDark
 import com.example.oeil.ui.theme.SurfaceDrawer
-import com.example.oeil.ui.theme.SurfaceDrawerItem
 import com.example.oeil.ui.theme.SurfaceElevated
+import com.example.oeil.ui.theme.SurfaceGlass
+import com.example.oeil.ui.theme.TextOnAccent
 import com.example.oeil.ui.theme.TextPrimary
 import com.example.oeil.ui.theme.TextSecondary
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 /**
- * Navigation drawer over the app's own conversations: new chat, search that
- * really filters, the real recent list, and a destructive clear.
- *
- * The header and footer stay put while the conversation list scrolls, so the
- * drawer never jumps when it opens or when the search field appears.
+ * Assistant-style sidebar: brand header, prominent new chat, live search,
+ * conversations grouped by recency, and the account card pinned at the bottom.
  */
 @Composable
 fun AppDrawer(
@@ -79,206 +82,140 @@ fun AppDrawer(
     onOpenSettings: () -> Unit,
     onClearAll: () -> Unit,
     onClose: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
-    var searching by remember { mutableStateOf(false) }
-    val matches = if (query.isBlank()) {
+    val filtered = if (query.isBlank()) {
         threads
     } else {
         threads.filter { it.title.contains(query.trim(), ignoreCase = true) }
     }
+    val groups = grouped(filtered)
 
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .widthIn(max = 320.dp)
+            .widthIn(max = 340.dp)
             .fillMaxWidth()
             .background(SurfaceDrawer)
-            .windowInsetsPadding(
-                WindowInsets.systemBars.only(
-                    WindowInsetsSides.Vertical + WindowInsetsSides.Start
-                )
-            )
+            .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start)),
     ) {
-        DrawerHeader(
-            searching = searching,
-            onToggleSearch = {
-                searching = !searching
-                if (!searching) query = ""
-            },
-            onClose = onClose
-        )
-
-        if (searching) {
-            SearchField(
-                value = query,
-                onValueChange = { query = it },
-                onCancel = {
-                    query = ""
-                    searching = false
-                }
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+        Header(onClose)
+        NewChatButton {
+            onNewChat()
+            onClose()
         }
-
-        DrawerRow(
-            icon = Icons.Outlined.Edit,
-            label = "New chat",
-            highlighted = true,
-            onClick = {
-                onNewChat()
-                onClose()
-            }
-        )
-
-        DrawerRow(
-            icon = Icons.Outlined.Settings,
-            label = "Settings",
-            onClick = {
-                onOpenSettings()
-                onClose()
-            }
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        DrawerRow(
-            icon = Icons.Outlined.DeleteSweep,
-            label = "Clear conversations",
-            onClick = {
+        SearchField(query) { query = it }
+        RecentHeader(
+            canClear = threads.isNotEmpty(),
+            onClearAll = {
                 onClearAll()
                 query = ""
-                onClose()
-            }
+            },
         )
-
-        Spacer(modifier = Modifier.height(12.dp))
-        SectionDivider()
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Text(
-            text = if (query.isBlank()) "Recent" else "Results",
-            style = MaterialTheme.typography.labelLarge,
-            color = TextSecondary,
-            modifier = Modifier.padding(horizontal = 26.dp, vertical = 4.dp)
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
 
         LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(bottom = 12.dp)
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(bottom = 8.dp),
         ) {
-            when {
-                threads.isEmpty() -> item(key = "empty") {
-                    EmptyNote("No conversations yet")
-                }
-
-                matches.isEmpty() -> item(key = "no-match") {
-                    EmptyNote("Nothing matches “${query.trim()}”")
-                }
-
-                else -> items(matches, key = { it.id }) { thread ->
-                    HistoryRow(
-                        thread = thread,
-                        active = thread.id == activeThreadId,
-                        onClick = { onOpenThread(thread.id) }
+            if (filtered.isEmpty()) {
+                item(key = "empty") {
+                    Text(
+                        text = if (threads.isEmpty()) "No conversations yet" else "No matches for “${query.trim()}”",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
                     )
+                }
+            } else {
+                groups.forEach { group ->
+                    item(key = "group-${group.label}") { GroupLabel(group.label) }
+                    items(group.threads, key = { it.id }) { thread ->
+                        ThreadRow(
+                            thread = thread,
+                            active = thread.id == activeThreadId,
+                            onClick = {
+                                onOpenThread(thread.id)
+                                onClose()
+                            },
+                        )
+                    }
                 }
             }
         }
 
-        SectionDivider()
-        DrawerFooter(user = user, conversationCount = threads.size)
+        AccountCard(user, threads.size, onOpenSettings)
     }
 }
 
 @Composable
-private fun DrawerHeader(
-    searching: Boolean,
-    onToggleSearch: () -> Unit,
-    onClose: () -> Unit
-) {
+private fun Header(onClose: () -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = "Oeil",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Medium,
-            color = TextPrimary,
-            fontSize = 18.sp
-        )
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        HeaderIcon(
-            icon = Icons.Default.Search,
-            contentDescription = if (searching) "Hide search" else "Search conversations",
-            onClick = onToggleSearch
-        )
-
-        Spacer(modifier = Modifier.width(4.dp))
-
-        HeaderIcon(
-            icon = Icons.Default.Close,
-            contentDescription = "Close menu",
-            onClick = onClose
-        )
+        Box(
+            modifier = Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(AccentGradient),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Visibility, null, tint = TextOnAccent, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "Oeil",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
+            )
+            Text("AI assistant", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+        }
+        IconButton(Icons.Outlined.Close, "Close menu", onClose)
     }
 }
 
 @Composable
-private fun HeaderIcon(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit
-) {
-    OeilTouch(onClick = onClick, modifier = Modifier.size(38.dp)) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = TextSecondary,
-            modifier = Modifier.size(20.dp)
-        )
+private fun NewChatButton(onClick: () -> Unit) {
+    OeilTouch(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(46.dp),
+        shape = RoundedCornerShape(14.dp),
+        brush = AccentGradient,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.Add, null, tint = TextOnAccent, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "New chat",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = TextOnAccent,
+            )
+        }
     }
 }
 
 @Composable
-private fun SearchField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    onCancel: () -> Unit
-) {
-    val shape = RoundedCornerShape(20.dp)
-    val focus = remember { FocusRequester() }
-
-    // Without this the composer behind the drawer keeps focus and swallows
-    // every keystroke meant for the search.
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-
+private fun SearchField(value: String, onValueChange: (String) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .clip(shape)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(SurfaceElevated)
-            .border(1.dp, OutlineDark, shape)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .border(1.dp, OutlineDark, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        Icon(Icons.Outlined.Search, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier
-                .weight(1f)
-                .focusRequester(focus),
+            modifier = Modifier.weight(1f),
             singleLine = true,
             textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextPrimary),
             cursorBrush = SolidColor(TextPrimary),
@@ -286,182 +223,191 @@ private fun SearchField(
             decorationBox = { inner ->
                 Box(contentAlignment = Alignment.CenterStart) {
                     if (value.isEmpty()) {
-                        Text(
-                            text = "Search conversations",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
-                        )
+                        Text("Search chats", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
                     }
                     inner()
                 }
-            }
+            },
         )
-
         if (value.isNotEmpty()) {
-            OeilTouch(onClick = onCancel, modifier = Modifier.size(24.dp)) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Clear search",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(14.dp)
-                )
-            }
+            IconButton(Icons.Outlined.Close, "Clear search", { onValueChange("") }, size = 24.dp, iconSize = 14.dp)
         }
     }
 }
 
 @Composable
-private fun DrawerRow(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    highlighted: Boolean = false
-) {
-    val shape = RoundedCornerShape(24.dp)
-    OeilTouch(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp),
-        shape = shape,
-        color = if (highlighted) SurfaceDrawerItem else Color.Transparent
+private fun RecentHeader(canClear: Boolean, onClearAll: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 10.dp, top = 10.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (highlighted) TextPrimary else TextSecondary,
-                modifier = Modifier.size(22.dp)
-            )
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (highlighted) FontWeight.Medium else FontWeight.Normal,
-                color = if (highlighted) TextPrimary else TextPrimary.copy(alpha = 0.9f)
+        Text(
+            "Recent",
+            style = MaterialTheme.typography.labelLarge,
+            color = TextSecondary,
+            modifier = Modifier.weight(1f),
+        )
+        if (canClear) {
+            IconButton(
+                Icons.Outlined.DeleteSweep,
+                "Clear conversations",
+                onClearAll,
+                size = 30.dp,
+                iconSize = 17.dp,
             )
         }
     }
 }
 
 @Composable
-private fun EmptyNote(text: String) {
+private fun GroupLabel(label: String) {
     Text(
-        text = text,
-        style = MaterialTheme.typography.bodyMedium,
-        color = TextSecondary,
-        modifier = Modifier.padding(horizontal = 26.dp, vertical = 10.dp)
+        text = label.uppercase(Locale.getDefault()),
+        style = MaterialTheme.typography.labelSmall,
+        color = TextSecondary.copy(alpha = 0.65f),
+        modifier = Modifier.padding(start = 22.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
     )
 }
 
 @Composable
-private fun HistoryRow(
-    thread: ChatThread,
-    active: Boolean,
-    onClick: () -> Unit
-) {
-    val shape = RoundedCornerShape(14.dp)
+private fun ThreadRow(thread: ChatThread, active: Boolean, onClick: () -> Unit) {
     OeilTouch(
         onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp),
-        shape = shape,
-        color = if (active) SurfaceDrawerItem else Color.Transparent
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 1.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = Color.Transparent,
+        brush = if (active) AccentGradientSoft else null,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .height(16.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(if (active) TextPrimary else Color.Transparent)
+            Icon(
+                Icons.Outlined.ChatBubbleOutline,
+                null,
+                tint = if (active) AccentPrimary else TextSecondary.copy(alpha = 0.8f),
+                modifier = Modifier.size(17.dp),
             )
-
-            Spacer(modifier = Modifier.width(11.dp))
-
+            Spacer(Modifier.width(10.dp))
             Text(
                 text = thread.title,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
-                color = TextPrimary.copy(alpha = if (active) 1f else 0.85f),
+                color = TextPrimary.copy(alpha = if (active) 1f else 0.82f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = timeLabel(thread.updatedAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary.copy(alpha = 0.65f),
             )
         }
     }
 }
 
 @Composable
-private fun SectionDivider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .height(1.dp)
-            .background(Color.White.copy(alpha = 0.06f))
-    )
+private fun AccountCard(user: User, conversationCount: Int, onOpenSettings: () -> Unit) {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(DividerGradient))
+    OeilTouch(
+        onClick = onOpenSettings,
+        modifier = Modifier.fillMaxWidth().padding(12.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = SurfaceGlass.copy(alpha = 0.55f),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(AccentGradientSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    initials(user.name),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = AccentPrimary,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    user.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = user.email ?: if (conversationCount == 1) "1 conversation" else "$conversationCount conversations",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(Icons.Outlined.Settings, "Settings", tint = TextSecondary, modifier = Modifier.size(18.dp))
+        }
+    }
 }
 
 @Composable
-private fun DrawerFooter(
-    user: User,
-    conversationCount: Int
+private fun IconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    onClick: () -> Unit,
+    size: androidx.compose.ui.unit.Dp = 34.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 20.dp,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(SurfaceDrawerItem),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = initials(user.name),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-            )
+    OeilTouch(onClick = onClick, modifier = Modifier.size(size)) {
+        Icon(icon, description, tint = TextSecondary, modifier = Modifier.size(iconSize))
+    }
+}
+
+private data class ThreadGroup(val label: String, val threads: List<ChatThread>)
+
+private fun grouped(threads: List<ChatThread>): List<ThreadGroup> {
+    val today = startOfDay(System.currentTimeMillis())
+    val yesterday = today - DAY
+    val week = today - 7 * DAY
+    val labels = listOf("Today", "Yesterday", "Previous 7 days", "Older")
+    return labels.mapNotNull { label ->
+        val matches = threads.filter {
+            val bucket = when {
+                it.updatedAt >= today -> "Today"
+                it.updatedAt >= yesterday -> "Yesterday"
+                it.updatedAt >= week -> "Previous 7 days"
+                else -> "Older"
+            }
+            bucket == label
         }
+        if (matches.isEmpty()) null else ThreadGroup(label, matches)
+    }
+}
 
-        Spacer(modifier = Modifier.width(10.dp))
+private fun startOfDay(millis: Long): Long = Calendar.getInstance().apply {
+    timeInMillis = millis
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+}.timeInMillis
 
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = user.name,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = if (conversationCount == 1) {
-                    "1 conversation"
-                } else {
-                    "$conversationCount conversations"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
+private fun timeLabel(timestamp: Long): String {
+    val diff = (System.currentTimeMillis() - timestamp).coerceAtLeast(0)
+    return when {
+        diff < 60_000 -> "now"
+        diff < 3_600_000 -> "${diff / 60_000}m"
+        diff < 86_400_000 -> "${diff / 3_600_000}h"
+        diff < 7 * DAY -> "${diff / DAY}d"
+        else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
     }
 }
 
@@ -473,3 +419,5 @@ private fun initials(name: String): String {
         else -> (parts.first().take(1) + parts.last().take(1)).uppercase()
     }
 }
+
+private const val DAY = 86_400_000L

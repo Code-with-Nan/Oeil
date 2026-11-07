@@ -154,13 +154,22 @@ cd backend && python3 -m unittest
 
 ```text
 app/src/main/java/com/example/oeil/
-├── OeilApp.kt                 # Profile, settings, account and wiring
-├── data/                      # Relay/auth clients, SQLite store
-├── screen/                    # Chat, appearance, account and settings screens
-├── state/                     # Conversation state and reply orchestration
-├── system/                    # Accessibility Service, approvals, status pill
-├── components/              # Chat UI components
-└── model/                     # Messages, threads and local profile
+├── MainActivity.kt            # Single activity and auth deep link
+├── OeilApp.kt                 # Profile, settings, account and screen wiring
+├── model/Models.kt            # Messages, threads, actions and local profile
+├── data/
+│   ├── OeilApi.kt             # Relay, auth, agent clients and URL rules
+│   └── OeilDatabase.kt        # SQLite profile, threads, messages and settings
+├── state/OeilChatState.kt     # Conversation state and reply orchestration
+├── ui/theme/Theme.kt          # Palette and typography
+├── components/
+│   ├── AppDrawer.kt           # Assistant-style sidebar
+│   ├── ChatComponents.kt      # Messages, typing dots, prompts, touch surface
+│   └── Composer.kt            # Header and composer
+├── screen/
+│   ├── OeilScreen.kt          # Chat layout, drawer and message list
+│   └── AccountScreens.kt      # Settings, appearance, account and sign-in
+└── system/OeilAccessibilityService.kt  # Android control, approvals, status pill
 backend/
 ├── main.py                    # FastAPI relay to NVIDIA model provider and agent
 ├── auth.py                    # Password, bearer session and OAuth endpoints

@@ -5,16 +5,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.example.oeil.data.ConversationReplySource
 import com.example.oeil.data.AndroidActionExecutor
 import com.example.oeil.data.AndroidAgentSource
-import com.example.oeil.data.MockConversationReplySource
-import com.example.oeil.data.local.OeilDatabase
+import com.example.oeil.data.ConversationReplySource
+import com.example.oeil.data.OeilDatabase
+import com.example.oeil.model.AgentTurn
 import com.example.oeil.model.Attachment
 import com.example.oeil.model.ChatMessage
 import com.example.oeil.model.ChatThread
 import com.example.oeil.model.ReplyMode
-import com.example.oeil.model.AgentTurn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,70 +25,50 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * Holds the conversation state for [com.example.oeil.screen.OeilScreen].
- *
- * Kept as a plain class so the screen only deals with layout, while message
- * history, typing flags and reply timing live in one testable place.
- *
- * Replies come from a [ConversationReplySource] (the Python relay in the app, canned text
- * in tests). When a [store] and [userId] are supplied, threads and messages are
- * mirrored into SQLite on a single background lane so writes stay ordered.
- */
+/** Conversation state for the chat screen: messages, drafts, replies and history. */
 class OeilChatState(
-    private val replySource: ConversationReplySource = MockConversationReplySource(),
-    private val replyDelayMs: Long = REPLY_DELAY_MS,
+    private val replySource: ConversationReplySource = ConversationReplySource { _, _ ->
+        error("No reply source configured.")
+    },
+    private val replyDelayMs: Long = 0L,
     private val store: OeilDatabase? = null,
     private val userId: String? = null,
     private val androidAgentSource: AndroidAgentSource? = null,
-    private val androidActionExecutor: AndroidActionExecutor? = null
+    private val androidActionExecutor: AndroidActionExecutor? = null,
 ) {
-
     val messages = mutableStateListOf<ChatMessage>()
-
-    /** Conversations shown in the drawer, newest first. Includes the one on screen. */
     val threads = mutableStateListOf<ChatThread>()
 
     var input by mutableStateOf("")
         private set
-
     var isTyping by mutableStateOf(false)
         private set
-
     var mode by mutableStateOf(ReplyMode.Auto)
         private set
-
     var androidMode by mutableStateOf(false)
         private set
-
     var draftAttachment by mutableStateOf<Attachment?>(null)
         private set
-
-    /** Thread the on-screen draft belongs to, or null for a brand new chat. */
     var activeThreadId by mutableStateOf<String?>(null)
         private set
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val persistenceScope =
-        CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val persistence = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private var replyJob: Job? = null
 
     val canSend: Boolean
         get() = !isTyping && (input.isNotBlank() || draftAttachment != null)
 
-    /** Row that should sit at the bottom: the typing placeholder, else the last message. */
+    /** Bottom row to keep on screen: the typing placeholder, else the last message. */
     val anchorIndex: Int
         get() = if (isTyping) messages.size else messages.size - 1
 
-    /** Restores saved conversations for the signed-in account. */
     suspend fun loadHistory() {
         val database = store ?: return
         val owner = userId ?: return
         val saved = withContext(Dispatchers.IO) { database.threads(owner) }
-        val merged = (saved + threads)
-            .distinctBy { it.id }
-            .sortedByDescending { it.updatedAt }
         threads.clear()
-        threads.addAll(merged)
+        threads.addAll((saved + threads).distinctBy { it.id }.sortedByDescending { it.updatedAt })
     }
 
     fun updateInput(value: String) {
@@ -101,7 +80,6 @@ class OeilChatState(
         input = if (input.isBlank()) text else "${input.trimEnd()} $text"
     }
 
-    /** Pre-fills the composer; the screen raises the keyboard as part of the same tap. */
     fun applySuggestion(suggestion: String) {
         input = suggestion
     }
@@ -132,7 +110,7 @@ class OeilChatState(
             ChatMessage(
                 content = text.ifEmpty { attachment?.label.orEmpty() },
                 isUser = true,
-                attachmentLabel = attachment?.label
+                attachmentLabel = attachment?.label,
             )
         )
         input = ""
@@ -147,13 +125,10 @@ class OeilChatState(
         replyJob = scope.launch {
             if (replyDelayMs > 0) delay(replyDelayMs)
             try {
-                // Network and blocking clients stay off the main thread.
                 if (useAndroid) {
                     runAndroidTask(text, activeMode)
                 } else {
-                    val reply = withContext(Dispatchers.IO) {
-                        replySource.reply(history, activeMode)
-                    }
+                    val reply = withContext(Dispatchers.IO) { replySource.reply(history, activeMode) }
                     messages.add(ChatMessage(content = reply, isUser = false))
                 }
                 isTyping = false
@@ -168,17 +143,15 @@ class OeilChatState(
         }
     }
 
-    /** Abandons the reply in flight; the composer stops offering the stop control. */
     fun stopGenerating() {
-        cancelPendingReply()
+        cancelReply()
         isTyping = false
     }
 
-    /** Shows an archived conversation. Nothing is lost: each send already saves the draft. */
     fun openThread(id: String) {
         if (id == activeThreadId) return
         val thread = threads.firstOrNull { it.id == id } ?: return
-        cancelPendingReply()
+        cancelReply()
         messages.clear()
         messages.addAll(thread.messages)
         activeThreadId = thread.id
@@ -187,9 +160,8 @@ class OeilChatState(
         isTyping = false
     }
 
-    /** Starts a blank draft; the conversation just on screen stays in [threads]. */
     fun startNewChat() {
-        cancelPendingReply()
+        cancelReply()
         messages.clear()
         activeThreadId = null
         input = ""
@@ -197,25 +169,25 @@ class OeilChatState(
         isTyping = false
     }
 
-    /** Drops the whole history and the open draft. */
     fun clearAll() {
-        cancelPendingReply()
+        cancelReply()
         threads.clear()
         messages.clear()
         activeThreadId = null
         input = ""
         draftAttachment = null
         isTyping = false
-        persistClear()
+        store?.let { database ->
+            userId?.let { owner -> persistence.launch { database.clearThreads(owner) } }
+        }
     }
 
-    /** Releases background persistence when the screen leaves composition. */
     fun close() {
-        cancelPendingReply()
-        persistenceScope.cancel()
+        cancelReply()
+        persistence.cancel()
     }
 
-    private fun cancelPendingReply() {
+    private fun cancelReply() {
         replyJob?.cancel()
         replyJob = null
     }
@@ -228,15 +200,7 @@ class OeilChatState(
             var taskContext = task
             repeat(MAX_AGENT_STEPS) {
                 controller.updateTaskStatus("Reading the screen")
-                val screen = try {
-                    controller.screenElements()
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Throwable) {
-                    messages.add(ChatMessage(content = failureMessage(error), isUser = false))
-                    syncThread()
-                    return
-                }
+                val screen = controller.screenElements()
                 val apps = try {
                     controller.installedApps()
                 } catch (cancelled: CancellationException) {
@@ -251,30 +215,21 @@ class OeilChatState(
                     screen = screen,
                     apps = apps,
                     history = messages.toList(),
-                    mode = activeMode
+                    mode = activeMode,
                 )) {
                     is AgentTurn.Message -> {
                         messages.add(ChatMessage(content = step.text, isUser = false))
                         syncThread()
                         return
                     }
+
                     is AgentTurn.Action -> step
                 }
 
-                messages.add(
-                    ChatMessage(content = "Android action: ${turn.action.summary}", isUser = false)
-                )
+                messages.add(ChatMessage(content = "Android action: ${turn.action.summary}", isUser = false))
                 syncThread()
                 controller.updateTaskStatus("Waiting for approval: ${turn.action.summary}")
-                val result = try {
-                    controller.approveAndPerform(turn.action)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Throwable) {
-                    messages.add(ChatMessage(content = failureMessage(error), isUser = false))
-                    syncThread()
-                    return
-                }
+                val result = controller.approveAndPerform(turn.action)
                 if (result == null) {
                     messages.add(ChatMessage(content = "Action denied. I stopped here.", isUser = false))
                     syncThread()
@@ -289,7 +244,7 @@ class OeilChatState(
             messages.add(
                 ChatMessage(
                     content = "I stopped after $MAX_AGENT_STEPS actions. Tell me what to do next.",
-                    isUser = false
+                    isUser = false,
                 )
             )
             syncThread()
@@ -298,34 +253,25 @@ class OeilChatState(
         }
     }
 
+    /** Mirrors the open conversation into the drawer and SQLite. */
     private fun syncThread() {
         if (messages.isEmpty()) return
         val snapshot = messages.toList()
-        val now = System.currentTimeMillis()
         val existing = activeThreadId?.let { id -> threads.indexOfFirst { it.id == id } } ?: -1
-        if (existing >= 0) {
-            val refreshed = threads.removeAt(existing)
-                .copy(title = titleOf(snapshot), messages = snapshot, updatedAt = now)
-            threads.add(0, refreshed)
-            persistThread(refreshed)
+        val thread = if (existing >= 0) {
+            threads.removeAt(existing).copy(
+                title = titleOf(snapshot),
+                messages = snapshot,
+                updatedAt = System.currentTimeMillis(),
+            )
         } else {
-            val created = ChatThread(title = titleOf(snapshot), messages = snapshot, updatedAt = now)
-            activeThreadId = created.id
-            threads.add(0, created)
-            persistThread(created)
+            ChatThread(title = titleOf(snapshot), messages = snapshot)
         }
-    }
-
-    private fun persistThread(thread: ChatThread) {
-        val database = store ?: return
-        val owner = userId ?: return
-        persistenceScope.launch { database.saveThread(owner, thread) }
-    }
-
-    private fun persistClear() {
-        val database = store ?: return
-        val owner = userId ?: return
-        persistenceScope.launch { database.clearThreads(owner) }
+        activeThreadId = thread.id
+        threads.add(0, thread)
+        store?.let { database ->
+            userId?.let { owner -> persistence.launch { database.saveThread(owner, thread) } }
+        }
     }
 
     private fun failureMessage(error: Throwable): String {
@@ -339,18 +285,11 @@ class OeilChatState(
 
     private fun titleOf(items: List<ChatMessage>): String {
         val first = items.firstOrNull { it.isUser }?.content ?: items.first().content
-        val flattened = first.replace('\n', ' ').trim()
-        return if (flattened.length <= TITLE_MAX) {
-            flattened
-        } else {
-            flattened.take(TITLE_MAX - 1).trimEnd() + "…"
-        }
+        val flat = first.replace('\n', ' ').trim()
+        return if (flat.length <= TITLE_MAX) flat else flat.take(TITLE_MAX - 1).trimEnd() + "…"
     }
 
-    private var replyJob: Job? = null
-
     private companion object {
-        const val REPLY_DELAY_MS = 0L
         const val TITLE_MAX = 42
         const val MAX_AGENT_STEPS = 8
         const val AGENT_SCREEN_SETTLE_MS = 1000L

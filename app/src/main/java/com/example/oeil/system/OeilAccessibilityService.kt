@@ -386,9 +386,9 @@ class OeilAccessibilityService : AccessibilityService() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(16), dp(20), dp(12))
             background = GradientDrawable().apply {
-                setColor(Color.rgb(17, 28, 22))
+                setColor(Color.rgb(7, 17, 15))
                 cornerRadius = dp(20).toFloat()
-                setStroke(dp(1), Color.rgb(70, 105, 78))
+                setStroke(dp(1), Color.rgb(32, 62, 55))
             }
             elevation = dp(12).toFloat()
         }
@@ -503,14 +503,14 @@ class OeilAccessibilityService : AccessibilityService() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(8), dp(18), dp(8))
             background = GradientDrawable().apply {
-                setColor(Color.rgb(17, 28, 22))
+                setColor(Color.rgb(7, 17, 15))
                 cornerRadius = dp(22).toFloat()
-                setStroke(dp(1), Color.rgb(70, 105, 78))
+                setStroke(dp(1), Color.rgb(32, 62, 55))
             }
             elevation = dp(8).toFloat()
         }
         pill.addView(ProgressBar(this, null, android.R.attr.progressBarStyleSmall).apply {
-            indeterminateTintList = ColorStateList.valueOf(Color.rgb(103, 200, 144))
+            indeterminateTintList = ColorStateList.valueOf(Color.rgb(52, 211, 153))
             layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply {
                 rightMargin = dp(10)
             }

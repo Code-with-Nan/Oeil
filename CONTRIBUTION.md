@@ -51,7 +51,7 @@ follow so reviews stay fast and the codebase stays consistent.
   - Reusable UI: nouns in `components/`
   - State holders: `*State` in `state/`
   - Data/source objects: nouns in `data/` or `model/`
-- **Colors**: add new palette entries to `ui/theme/Color.kt` — do not hard-code hex values
+- **Colors**: add new palette entries to `ui/theme/Theme.kt` — do not hard-code hex values
   inside composables.
 - **Comments**: document *why*, not *what*. KDoc public API; leave self-explanatory code alone.
 - **Java style**: 4-space indentation, Javadoc on public types, `@NonNull`/`@Nullable` from
@@ -66,8 +66,8 @@ follow so reviews stay fast and the codebase stays consistent.
 ## Tests
 
 - Unit tests go in `app/src/test/`, instrumentation/UI tests in `app/src/androidTest/`.
-- Pure logic (`MockReplySource`, `OeilChatState` behaviour) should be covered by unit tests;
-  plain JUnit tests may be written in Java (see `MockReplySourceTest`).
+- Pure logic (`OeilChatState` behaviour) should be covered by unit tests; plain JUnit
+  tests may be written in Java where interop is involved.
 - Run everything before opening a PR:
 
   ```bash

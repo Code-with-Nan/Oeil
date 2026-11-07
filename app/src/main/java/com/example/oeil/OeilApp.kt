@@ -32,17 +32,17 @@ import androidx.compose.ui.unit.dp
 import com.example.oeil.data.AuthClient
 import com.example.oeil.data.AuthSession
 import com.example.oeil.data.BackendReplySource
-import com.example.oeil.data.local.OeilDatabase
+import com.example.oeil.data.OeilDatabase
 import com.example.oeil.data.normalizeBackendUrl
 import com.example.oeil.model.User
 import com.example.oeil.screen.AuthScreen
 import com.example.oeil.screen.OeilScreen
 import com.example.oeil.screen.SettingsScreen
 import com.example.oeil.system.OeilAccessibility
-import com.example.oeil.ui.theme.BackgroundDark
-import com.example.oeil.ui.theme.GreenPrimary
+import com.example.oeil.ui.theme.AccentGradient
+import com.example.oeil.ui.theme.AccentPrimary
+import com.example.oeil.ui.theme.ChatBackgroundGradient
 import com.example.oeil.ui.theme.OeilTheme
-import com.example.oeil.ui.theme.TextPrimary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -267,20 +267,19 @@ private fun BootScreen(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(BackgroundDark),
+            .background(ChatBackgroundGradient),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = "Oeil",
-                style = MaterialTheme.typography.headlineMedium,
+                style = MaterialTheme.typography.headlineMedium.copy(brush = AccentGradient),
                 fontWeight = FontWeight.Medium,
-                color = TextPrimary,
             )
             Spacer(modifier = Modifier.height(20.dp))
             CircularProgressIndicator(
                 modifier = Modifier.size(22.dp),
-                color = GreenPrimary,
+                color = AccentPrimary,
                 strokeWidth = 2.dp,
             )
         }
