@@ -48,7 +48,13 @@ error, and the running app never silently falls back to mock replies.
 | `OeilChatState` | Message/thread state, reply lifecycle and local persistence |
 | `BackendReplySource` | JSON HTTP client for the Python `/chat` endpoint |
 | `OeilDatabase` | SQLite local profile, threads, messages and settings |
-| `backend/auth.py` | Password hashing, revocable sessions and provider OAuth |
+| `backend/auth.py` | Email/password and OAuth routes; compatibility re-exports |
+| `backend/app/config.py` | Environment and provider configuration |
+| `backend/app/db/` | SQLite connection, schema and user/session/OAuth operations |
+| `backend/app/deps.py` | Shared bearer-session dependency and current-user lookup |
+| `backend/app/prompts.py`, `backend/app/schemas.py` | Gemini prompts, tool declarations and request/response models |
+| `backend/app/security.py` | Password hashing and signed session tokens |
+| `backend/app/services/auth_service.py` | Email/password signup, login and session issuance |
 | `backend/main.py` | Validates chat and agent requests and calls Gemini |
 
 `MockConversationReplySource` remains available for unit tests; it is not wired
@@ -63,19 +69,32 @@ into the installed app.
 and whether a provider key is present.
 
 Account endpoints are `POST /auth/signup`, `POST /auth/login`, `GET /auth/me`,
-and `POST /auth/logout`. Passwords are PBKDF2-hashed, and sessions are signed
-bearer tokens backed by revocable SQLite records. `GET /auth/oauth/{provider}/start`
-begins Google, Microsoft or GitHub authorization; the backend handles the
-provider callback and returns the session to the app through
-`oeil://auth/callback`. Configure `OEIL_AUTH_SECRET`, `OEIL_PUBLIC_BASE_URL`, and
-provider client credentials on the server. OAuth requires a public HTTPS backend.
+and `POST /auth/logout`. Signup normalizes the email, rejects duplicate
+addresses, hashes the password with PBKDF2-SHA256, stores the user in SQLite,
+and returns a signed bearer session. Login looks up the normalized email,
+verifies the stored password hash, and issues a revocable session; `/auth/me`
+checks the active session and `/auth/logout` revokes it.
+`GET /auth/oauth/{provider}/start` begins Google, Microsoft or GitHub
+authorization; the backend handles the provider callback and returns the session
+to the app through `oeil://auth/callback`. OAuth account links and short-lived
+authorization states are stored in SQLite. Configure `OEIL_AUTH_SECRET`,
+`OEIL_PUBLIC_BASE_URL`, and provider client credentials on the server. OAuth
+requires a public HTTPS backend.
 
-Configuration is read from the backend process environment:
+Configuration is read from the backend process environment.
+`backend/app/config.py` loads `backend/.env` when present; process environment
+variables take precedence.
 
 - `GEMINI_API_KEY` is required and must never be placed in Android resources,
   Gradle properties, or the APK.
 - `GEMINI_API_BASE_URL` defaults to `https://generativelanguage.googleapis.com/v1beta`.
 - `GEMINI_MODEL` defaults to `gemini-3.5-flash`.
+- `OEIL_AUTH_SECRET` is required for account endpoints and OAuth callbacks and
+  must be at least 32 characters.
+- `OEIL_AUTH_DB_PATH` selects the SQLite auth database (default
+  `oeil-auth.sqlite3`).
+- `OEIL_PUBLIC_BASE_URL`, provider client IDs, and provider client secrets enable
+  OAuth.
 
 `POST /agent/step` accepts a task, the recent conversation, up to 100 visible
 screen elements, and up to 300 launchable apps. Gemini may return one of nine
@@ -92,8 +111,10 @@ bearer auth on `/chat` if guest access is not intended.
 ## Data and privacy
 
 Conversations and appearance preferences are stored in the app's local SQLite
-database. The service URL is compiled into the APK. Text conversation history
-and, when Android control is active, visible screen labels and the launchable app
-list are sent to the relay. The current attachment flow stores and displays a
-label; image bytes are not sent to the model. Screenshot vision and arbitrary
-gestures are not implemented.
+database. Backend account records (users, password hashes, sessions, OAuth
+accounts and authorization states) are stored in the backend SQLite database
+selected by `OEIL_AUTH_DB_PATH`. The service URL is compiled into the APK.
+Text conversation history and, when Android control is active, visible screen
+labels and the launchable app list are sent to the relay. The current attachment
+flow stores and displays a label; image bytes are not sent to the model.
+Screenshot vision and arbitrary gestures are not implemented.

@@ -38,14 +38,20 @@ cp .env.example .env   # or create .env with GEMINI_API_KEY=...
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-`backend/.env` is loaded automatically. Shell environment variables take
-precedence over the file. A blank `GEMINI_MODEL` falls back to the working
-default.
+`backend/.env` is loaded automatically by `backend/app/config.py`. Shell
+environment variables take precedence over the file. A blank `GEMINI_MODEL`
+falls back to the working default.
 
-The auth database is stored in `backend/oeil-auth.sqlite3` by default. Set
-`OEIL_AUTH_DB_PATH` to choose another persistent location. `OEIL_AUTH_SECRET`
+The SQLite auth database is stored in `backend/oeil-auth.sqlite3` by default.
+Set `OEIL_AUTH_DB_PATH` to choose another persistent location. `OEIL_AUTH_SECRET`
 must be a stable random secret of at least 32 characters; changing it invalidates
 existing sessions.
+
+Email/password sign-up normalizes the email, rejects duplicates, stores a
+PBKDF2-SHA256 password hash, and returns a signed bearer session. Login verifies
+the stored hash and issues a revocable session; `/auth/me` checks the active
+session and `/auth/logout` revokes it. Users, sessions, OAuth accounts, and OAuth
+states are stored in SQLite.
 
 To enable provider sign-in, serve the backend over HTTPS, set
 `OEIL_PUBLIC_BASE_URL` to its public origin, and configure each provider's client
@@ -137,7 +143,16 @@ app/src/main/java/com/example/oeil/
 └── model/                     # Messages, threads, and local profile
 backend/
 ├── main.py                    # FastAPI relay to Gemini and the Android agent
-├── auth.py                    # Password, bearer session and OAuth endpoints
+├── auth.py                    # Email/password, OAuth and compatibility re-exports
+├── app/
+│   ├── config.py              # Environment and provider configuration
+│   ├── db/                    # SQLite connection, schema and table operations
+│   ├── deps.py                # Shared bearer-session dependency
+│   ├── prompts.py             # Gemini prompts and agent tool declarations
+│   ├── schemas.py             # Request and response models
+│   ├── security.py            # Password hashing and signed session tokens
+│   └── services/
+│       └── auth_service.py    # Email/password signup, login and session issuance
 └── test_main.py               # Backend contract and auth tests
 ```
 
